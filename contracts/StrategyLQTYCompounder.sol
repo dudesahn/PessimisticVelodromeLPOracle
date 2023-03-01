@@ -35,7 +35,7 @@ contract StrategyLQTYCompounder is BaseStrategy {
     /* ========== STATE VARIABLES ========== */
 
     /// @notice LQTY staking contract
-    ILiquityStaking public staking = ILiquityStaking(0x4f9Fbb3f1E99B56e0Fe2892e623Ed36A76Fc605d);
+    ILiquityStaking public lqtyStaking = ILiquityStaking(0x4f9Fbb3f1E99B56e0Fe2892e623Ed36A76Fc605d);
 
     /// @notice The percentage of LQTY from each harvest that we send to yearn's secondary staker to boost yields.
     uint256 public keepLQTY;
