@@ -21,7 +21,7 @@ interface ILiquityStaking {
     function stakes(address _user) external view returns (uint);
 }
 
-contract StrategyLQTYStaker is BaseStrategy {
+contract yLQTYVoter is BaseStrategy {
     using SafeERC20 for IERC20;
     /* ========== STATE VARIABLES ========== */
 
@@ -37,41 +37,26 @@ contract StrategyLQTYStaker is BaseStrategy {
     /// @notice Convert our ether rewards into weth for easier swaps
     IERC20 public constant weth = IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
 
-    // we use this to be able to adjust our strategy's name
-    string internal stratName;
-    
-    // basically we should have each harvest where more LQTY is transferred here also stake the LQTY and send profits back to the vault as well
+    /// @notice This makes sure gov can only sweep out LQTY after a 2-week waiting period.
+    uint256 public unstakeQueued;
 
     /* ========== CONSTRUCTOR ========== */
 
     constructor() {
         // do our approvals
         lqty.approve(address(lqtyStaking), type(uint256).max);
-
-        // set our strategy's name
-        stratName = "";
     }
 
     /* ========== VIEWS ========== */
 
     /// @notice Strategy name.
     function name() external view override returns (string memory) {
-        return stratName;
+        return "yLQTYVoter";
     }
 
     /// @notice Balance of want staked in Liquity's staking contract.
     function stakedBalance() public view returns (uint256) {
-        return proxy.balanceOf(gauge);
-    }
-
-    /// @notice Balance of want sitting in our strategy.
-    function balanceOfWant() public view returns (uint256) {
-        return want.balanceOf(address(this));
-    }
-
-    /// @notice Total assets the strategy holds, sum of loose and staked want.
-    function estimatedTotalAssets() public view override returns (uint256) {
-        return balanceOfWant() + stakedBalance();
+        return lqtyStaking.stakes(address(this);
     }
 
     /* ========== CORE FUNCTIONS ========== */
@@ -106,7 +91,13 @@ contract StrategyLQTYStaker is BaseStrategy {
         }
     }
     
+    function queueSweep() onlyGovernance {
+        unstakeQueued = block.timestamp;
+    }
+    
     function unstakeAndSweep(uint256 _amount) onlyGovernance {
+        require(block.timestamp > unstakeQueued + 2 weeks && block.timestamp < unstakeQueued + 3 weeks, "Try again");
+        
         // if we request more than we have, we still just get our whole stake
         lqtyStaking.unstake(_amount);
         
