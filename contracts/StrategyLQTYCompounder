@@ -14,35 +14,52 @@ interface ITradeFactory {
     function disable(address, address) external;
 }
 
-interface IDetails {
-    // get details from curve
-    function name() external view returns (string memory);
-
-    function symbol() external view returns (string memory);
+interface IWETH {
+    function deposit(uint256) external payable;
 }
 
-contract StrategyCurveBoostedFactoryClonable is BaseStrategy {
+interface ILiquityStaking {
+    function stake(uint _LQTYamount) external;
+
+    function unstake(uint _LQTYamount) external;
+
+    function getPendingETHGain(address _user) external view returns (uint);
+
+    function getPendingLUSDGain(address _user) external view returns (uint);
+
+    function stakes(address _user) external view returns (uint);
+}
+
+contract StrategyLQTYCompounder is BaseStrategy {
     using SafeERC20 for IERC20;
     /* ========== STATE VARIABLES ========== */
 
-    /// @notice Yearn's strategyProxy, needed for interacting with our Curve Voter.
-    ICurveStrategyProxy public proxy;
+    /// @notice LQTY staking contract
+    ILiquityStaking public staking = ILiquityStaking(0x4f9Fbb3f1E99B56e0Fe2892e623Ed36A76Fc605d);
 
-    /// @notice Curve gauge contract, most are tokenized, held by Yearn's voter.
-    address public gauge;
+    /// @notice The percentage of LQTY from each harvest that we send to yearn's secondary staker to boost yields.
+    uint256 public keepLQTY;
 
-    /// @notice The percentage of CRV from each harvest that we send to our voter (out of 10,000).
-    uint256 public localKeepCRV;
-
-    /// @notice The address of our Curve voter. This is where we send any keepCRV.
-    address public curveVoter;
+    /// @notice The address of our Liquity voter. This is where we send any keepLQTY.
+    address public liquityVoter = ;
 
     // this means all of our fee values are in basis points
     uint256 internal constant FEE_DENOMINATOR = 10000;
 
-    /// @notice The address of our base token (CRV for Curve, BAL for Balancer, etc.).
-    IERC20 public constant crv =
-        IERC20(0xD533a949740bb3306d119CC777fa900bA034cd52);
+    /// @notice Address of our main rewards token, LUSD
+    IERC20 public constant lusd = IERC20();
+
+    /// @notice Minimum profit size in USDC that we want to harvest.
+    /// @dev Only used in harvestTrigger.
+    uint256 public harvestProfitMinInUsdc;
+
+    /// @notice Maximum profit size in USDC that we want to harvest (ignore gas price once we get here).
+    /// @dev Only used in harvestTrigger.
+    uint256 public harvestProfitMaxInUsdc;
+    
+    /// @notice 
+    IERC20 internal constant weth =
+        IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
 
     // we use this to be able to adjust our strategy's name
     string internal stratName;
@@ -50,9 +67,6 @@ contract StrategyCurveBoostedFactoryClonable is BaseStrategy {
     // ySwaps stuff
     /// @notice The address of our ySwaps trade factory.
     address public tradeFactory;
-
-    /// @notice Array of any extra rewards tokens this Convex pool may have.
-    address[] public rewardsTokens;
 
     /// @notice Will only be true on the original deployed contract and not on clones; we don't want to clone a clone.
     bool public isOriginal = true;
@@ -62,125 +76,32 @@ contract StrategyCurveBoostedFactoryClonable is BaseStrategy {
     constructor(
         address _vault,
         address _tradeFactory,
-        address _proxy,
-        address _gauge
+        uint256 _harvestProfitMinInUsdc,
+        uint256 _harvestProfitMaxInUsdc
     ) BaseStrategy(_vault) {
-        _initializeStrat(_tradeFactory, _proxy, _gauge);
-    }
-
-    /* ========== CLONING ========== */
-
-    event Cloned(address indexed clone);
-
-    /// @notice Use this to clone an exact copy of this strategy on another vault.
-    /// @dev In practice, this will only be called by the factory on the template contract.
-    /// @param _vault Vault address we are targeting with this strategy.
-    /// @param _strategist Address to grant the strategist role.
-    /// @param _rewards If we have any strategist rewards, send them here.
-    /// @param _keeper Address to grant the keeper role.
-    /// @param _tradeFactory Our trade factory address.
-    /// @param _proxy Our strategy proxy address.
-    /// @param _gauge Gauge address for this strategy.
-    /// @return newStrategy Address of our new cloned strategy.
-    function cloneStrategyCurveBoosted(
-        address _vault,
-        address _strategist,
-        address _rewards,
-        address _keeper,
-        address _tradeFactory,
-        address _proxy,
-        address _gauge
-    ) external returns (address newStrategy) {
-        // don't clone a clone
-        if (!isOriginal) {
-            revert();
-        }
-
-        // Copied from https://github.com/optionality/clone-factory/blob/master/contracts/CloneFactory.sol
-        bytes20 addressBytes = bytes20(address(this));
-        assembly {
-            // EIP-1167 bytecode
-            let clone_code := mload(0x40)
-            mstore(
-                clone_code,
-                0x3d602d80600a3d3981f3363d3d373d3d3d363d73000000000000000000000000
-            )
-            mstore(add(clone_code, 0x14), addressBytes)
-            mstore(
-                add(clone_code, 0x28),
-                0x5af43d82803e903d91602b57fd5bf30000000000000000000000000000000000
-            )
-            newStrategy := create(0, clone_code, 0x37)
-        }
-
-        StrategyCurveBoostedFactoryClonable(newStrategy).initialize(
-            _vault,
-            _strategist,
-            _rewards,
-            _keeper,
-            _tradeFactory,
-            _proxy,
-            _gauge
-        );
-
-        emit Cloned(newStrategy);
-    }
-
-    /// @notice Initialize the strategy.
-    /// @dev This should only be called by the clone function above.
-    /// @param _vault Vault address we are targeting with this strategy.
-    /// @param _strategist Address to grant the strategist role.
-    /// @param _rewards If we have any strategist rewards, send them here.
-    /// @param _keeper Address to grant the keeper role.
-    /// @param _tradeFactory Our trade factory address.
-    /// @param _proxy Our strategy proxy address.
-    /// @param _gauge Gauge address for this strategy.
-    function initialize(
-        address _vault,
-        address _strategist,
-        address _rewards,
-        address _keeper,
-        address _tradeFactory,
-        address _proxy,
-        address _gauge
-    ) public {
-        _initialize(_vault, _strategist, _rewards, _keeper);
-        _initializeStrat(_tradeFactory, _proxy, _gauge);
-    }
-
-    // this is called by our original strategy, as well as any clones
-    function _initializeStrat(
-        address _tradeFactory,
-        address _proxy,
-        address _gauge
-    ) internal {
         // make sure that we haven't initialized this before
-        if (gauge != address(0)) {
+        if (tradeFactory != address(0)) {
             revert(); // already initialized.
         }
 
         // 1:1 assignments
         tradeFactory = _tradeFactory;
-        proxy = ICurveStrategyProxy(_proxy); // our factory checks the latest proxy from curve voter and passes it here
-        gauge = _gauge;
+        harvestProfitMinInUsdc = _harvestProfitMinInUsdc;
+        harvestProfitMaxInUsdc = _harvestProfitMaxInUsdc;
 
-        // want = Curve LP
-        want.approve(_proxy, type(uint256).max);
+        // want = LQTY
+        want.approve(address(lqtyStaking), type(uint256).max);
 
-        // set up our min and max delays
-        minReportDelay = 21 days;
+        // set up our max delay
         maxReportDelay = 365 days;
 
-        // ySwaps setup
+        // set up rewards and trade factory
+        address[] stakingRewards = [(address(weth), address(lusd)];
+        _updateRewards(stakingRewards);
         _setUpTradeFactory();
 
         // set our strategy's name
-        stratName = string(
-            abi.encodePacked(
-                "StrategyCurveBoostedFactory-",
-                IDetails(address(want)).symbol()
-            )
-        );
+        stratName = "StrategyLQTYCompounder";
     }
 
     /* ========== VIEWS ========== */
@@ -190,7 +111,7 @@ contract StrategyCurveBoostedFactoryClonable is BaseStrategy {
         return stratName;
     }
 
-    /// @notice Balance of want staked in Curve's gauge.
+    /// @notice Balance of want staked in Liquity's staking contract.
     function stakedBalance() public view returns (uint256) {
         return proxy.balanceOf(gauge);
     }
@@ -215,34 +136,32 @@ contract StrategyCurveBoostedFactoryClonable is BaseStrategy {
         returns (uint256 _profit, uint256 _loss, uint256 _debtPayment)
     {
         // rewards will be converted later with mev protection by yswaps (tradeFactory)
-        // if we have anything in the gauge, then harvest CRV from the gauge
+        // if we have anything staked, harvest our rewards
         uint256 _stakedBal = stakedBalance();
         if (_stakedBal > 0) {
-            proxy.harvest(gauge);
-
-            // by default this is zero, but if we want any for our voter this will be used
-            uint256 _localKeepCRV = localKeepCRV;
-            address _curveVoter = curveVoter;
-            if (_localKeepCRV > 0 && _curveVoter != address(0)) {
-                uint256 crvBalance = crv.balanceOf(address(this));
-                uint256 _sendToVoter;
-                unchecked {
-                    _sendToVoter =
-                        (crvBalance * _localKeepCRV) /
-                        FEE_DENOMINATOR;
-                }
-                if (_sendToVoter > 0) {
-                    crv.safeTransfer(_curveVoter, _sendToVoter);
-                }
+            liquityStaking.unstake(0);
+            // convert our ether to weth if we have any
+            uint256 ethBalance = address(this).balance;
+            if (ethBalance > 0) {
+                IWETH(address(weth)).deposit{value: ethBalance}();
+            }
+        }
+        
+        // this defaults to 5%
+        uint256 _keepLQTY = keepLQTY;
+        address _liquityVoter = liquityVoter;
+        if (_keepLQTY > 0 && _liquityVoter != address(0)) {
+            uint256 lqtyBalance = crv.balanceOf(address(this));
+            uint256 _sendToVoter;
+            unchecked {
+                _sendToVoter = (lqtyBalance * _keepLQTY) / FEE_DENOMINATOR;
+            }
+            if (_sendToVoter > 0) {
+                lqty.safeTransfer(_liquityVoter, _sendToVoter);
             }
         }
 
-        // claim any extra rewards we may have
-        if (rewardsTokens.length > 0) {
-            proxy.claimManyRewards(gauge, rewardsTokens);
-        }
-
-        // serious loss should never happen, but if it does (for instance, if Curve is hacked), let's record it accurately
+        // serious loss should never happen, but if it does, let's record it accurately
         uint256 assets = estimatedTotalAssets();
         uint256 debt = vault.strategies(address(this)).totalDebt;
 
@@ -286,8 +205,7 @@ contract StrategyCurveBoostedFactoryClonable is BaseStrategy {
         // Send all of our LP tokens to the proxy and deposit to the gauge
         uint256 _toInvest = balanceOfWant();
         if (_toInvest > 0) {
-            want.safeTransfer(address(proxy), _toInvest);
-            proxy.deposit(gauge, address(want));
+            lqtyStaking.stake(_toInvest);
         }
     }
 
@@ -304,9 +222,7 @@ contract StrategyCurveBoostedFactoryClonable is BaseStrategy {
                     _neededFromStaked = _amountNeeded - _wantBal;
                 }
                 // withdraw whatever extra funds we need
-                proxy.withdraw(
-                    gauge,
-                    address(want),
+                lqtyStaking.unstake(
                     Math.min(_stakedBal, _neededFromStaked)
                 );
             }
@@ -326,21 +242,26 @@ contract StrategyCurveBoostedFactoryClonable is BaseStrategy {
         uint256 _stakedBal = stakedBalance();
         if (_stakedBal > 0) {
             // don't bother withdrawing zero, save gas where we can
-            proxy.withdraw(gauge, address(want), _stakedBal);
+            lqtyStaking.unstake(_stakedBal);
         }
         return balanceOfWant();
     }
 
-    // migrate our want token to a new strategy if needed, as well as our CRV
+    // migrate our want token to a new strategy if needed, as well as any LUSD or ether
     function prepareMigration(address _newStrategy) internal override {
         uint256 stakedBal = stakedBalance();
         if (stakedBal > 0) {
-            proxy.withdraw(gauge, address(want), stakedBal);
+            lqtyStaking.unstake(_stakedBal);
         }
-        uint256 crvBal = crv.balanceOf(address(this));
+        uint256 lusdBalance = lusd.balanceOf(address(this));
+        uint256 ethBalance = address(this).balance;
 
-        if (crvBal > 0) {
-            crv.safeTransfer(_newStrategy, crvBal);
+        if (lusdBalance > 0) {
+            lusd.safeTransfer(_newStrategy, lusdBalance);
+        }
+
+        if (ethBalance > 0) {
+            address(this).transfer(_newStrategy, ethBalance);
         }
     }
 
@@ -441,8 +362,8 @@ contract StrategyCurveBoostedFactoryClonable is BaseStrategy {
      *  Provide a signal to the keeper that harvest() should be called.
      *
      *  Don't harvest if a strategy is inactive.
-     *  If we exceed our max delay, then harvest no matter what. For
-     *  our min delay, credit threshold, and manual force trigger,
+     *  If our profit exceeds our upper limit, then harvest no matter what. For
+     *  our lower profit limit, credit threshold, max delay, and manual force trigger,
      *  only harvest if our gas price is acceptable.
      *
      * @param callCostinEth The keeper's estimated gas cost to call harvest() (in wei).
@@ -456,9 +377,9 @@ contract StrategyCurveBoostedFactoryClonable is BaseStrategy {
             return false;
         }
 
-        StrategyParams memory params = vault.strategies(address(this));
-        // harvest no matter what once we reach our maxDelay
-        if (block.timestamp - params.lastReport > maxReportDelay) {
+        // harvest if we have a profit to claim at our upper limit without considering gas price
+        uint256 claimableProfit = claimableProfitInUsdc();
+        if (claimableProfit > harvestProfitMaxInUsdc) {
             return true;
         }
 
@@ -472,8 +393,14 @@ contract StrategyCurveBoostedFactoryClonable is BaseStrategy {
             return true;
         }
 
-        // harvest if we hit our minDelay, but only if our gas price is acceptable
-        if (block.timestamp - params.lastReport > minReportDelay) {
+        // harvest if we have a sufficient profit to claim, but only if our gas price is acceptable
+        if (claimableProfit > harvestProfitMinInUsdc) {
+            return true;
+        }
+
+        StrategyParams memory params = vault.strategies(address(this));
+        // harvest regardless of profit once we reach our maxDelay
+        if (block.timestamp - params.lastReport > maxReportDelay) {
             return true;
         }
 
@@ -486,6 +413,24 @@ contract StrategyCurveBoostedFactoryClonable is BaseStrategy {
         return false;
     }
 
+    /// @notice Calculates the profit if all claimable assets were sold for USDC (6 decimals).
+    /// @dev Uses yearn's lens oracle, if returned values are strange then troubleshoot there.
+    /// @return Total return in USDC from selling claimable LUSD and ETH.
+    function claimableProfitInUsdc() public view returns (uint256) {
+        IOracle yearnOracle = IOracle(
+            0x83d95e0D5f402511dB06817Aff3f9eA88224B030
+        ); // yearn lens oracle
+        uint256 lusdPrice = yearnOracle.getPriceUsdcRecommended(address(lusd));
+        uint256 etherPrice = yearnOracle.getPriceUsdcRecommended(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2); // use weth address
+        
+        uint256 claimableLusd = lqtyStaking.getPendingLUSDGain(address(this));
+        uint256 claimableETH = lqtyStaking.getPendingETHGain(address(this));
+
+        // Oracle returns prices as 6 decimals, so multiply by claimable amount and divide by token decimals (1e18)
+        return
+            (lusdPrice * claimableLusd + etherPrice * claimableETH) / 1e18;
+    }
+
     /// @notice Convert our keeper's eth cost into want
     /// @dev We don't use this since we don't factor call cost into our harvestTrigger.
     /// @param _ethAmount Amount of ether spent.
@@ -494,20 +439,23 @@ contract StrategyCurveBoostedFactoryClonable is BaseStrategy {
         uint256 _ethAmount
     ) public view override returns (uint256) {}
 
+    // include so our contract plays nicely with ether
+    receive() external payable {}
+
     /* ========== SETTERS ========== */
     // These functions are useful for setting parameters of the strategy that may need to be adjusted.
 
     /// @notice Use this to set or update our keep amounts for this strategy.
     /// @dev Must be less than 10,000. Set in basis points. Only governance can set this.
     /// @param _keepCrv Percent of each CRV harvest to send to our voter.
-    function setLocalKeepCrv(uint256 _keepCrv) external onlyGovernance {
-        if (_keepCrv > 10_000) {
+    function setKeepLqty(uint256 _keepLqty) external onlyGovernance {
+        if (_keepLqty > 1000) {
             revert();
         }
-        if (_keepCrv > 0 && curveVoter == address(0)) {
+        if (_keepLqty > 0 && liquityVoter == address(0)) {
             revert();
         }
-        localKeepCRV = _keepCrv;
+        keepLqty = _keepLqty;
     }
 
     /// @notice Use this to set or update our voter contracts.
@@ -516,5 +464,25 @@ contract StrategyCurveBoostedFactoryClonable is BaseStrategy {
     /// @param _curveVoter Address of our curve voter.
     function setVoter(address _curveVoter) external onlyGovernance {
         curveVoter = _curveVoter;
+    }
+
+    /**
+     * @notice
+     *  Here we set various parameters to optimize our harvestTrigger.
+     * @param _harvestProfitMinInUsdc The amount of profit (in USDC, 6 decimals)
+     *  that will trigger a harvest if gas price is acceptable.
+     * @param _harvestProfitMaxInUsdc The amount of profit in USDC that
+     *  will trigger a harvest regardless of gas price.
+     * @param _checkEarmark Whether or not we should check Convex's
+     *  booster to see if we need to earmark before harvesting.
+     */
+    function setHarvestTriggerParams(
+        uint256 _harvestProfitMinInUsdc,
+        uint256 _harvestProfitMaxInUsdc,
+        bool _checkEarmark
+    ) external onlyVaultManagers {
+        harvestProfitMinInUsdc = _harvestProfitMinInUsdc;
+        harvestProfitMaxInUsdc = _harvestProfitMaxInUsdc;
+        checkEarmark = _checkEarmark;
     }
 }
