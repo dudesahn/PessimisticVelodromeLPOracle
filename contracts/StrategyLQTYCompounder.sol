@@ -14,8 +14,8 @@ interface ITradeFactory {
     function disable(address, address) external;
 }
 
-interface IWETH {
-    function deposit(uint256) external payable;
+interface IWeth {
+    function deposit() external payable;
 }
 
 interface ILiquityStaking {
@@ -143,7 +143,7 @@ contract StrategyLQTYCompounder is BaseStrategy {
             // convert our ether to weth if we have any
             uint256 ethBalance = address(this).balance;
             if (ethBalance > 0) {
-                IWETH(address(weth)).deposit{value: ethBalance}();
+                IWeth(address(weth)).deposit{value: ethBalance}();
             }
         }
         
