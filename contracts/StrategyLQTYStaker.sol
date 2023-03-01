@@ -18,6 +18,10 @@ interface IWeth {
     function deposit() external payable;
 }
 
+interface IVoter {
+    function strategyHarvest(uint256) external;
+}
+
 interface ILiquityStaking {
     function stake(uint _LQTYamount) external;
 
@@ -41,7 +45,7 @@ contract StrategyLQTYStaker is BaseStrategy {
     uint256 public keepLQTY;
 
     /// @notice The address of our Liquity voter. This is where we send any keepLQTY.
-    address public liquityVoter = ;
+    IVoter public liquityVoter;
 
     // this means all of our fee values are in basis points
     uint256 internal constant FEE_DENOMINATOR = 10000;
@@ -112,7 +116,7 @@ contract StrategyLQTYStaker is BaseStrategy {
 
     /// @notice Balance of want staked in Liquity's staking contract.
     function stakedBalance() public view returns (uint256) {
-        return proxy.balanceOf(gauge);
+        return lqtyStaking.stakes(address(this));
     }
 
     /// @notice Balance of want sitting in our strategy.
@@ -146,17 +150,17 @@ contract StrategyLQTYStaker is BaseStrategy {
             }
         }
         
-        // this defaults to 5%
+        // send some LQTY to our voter and claim accrued yield from it
         uint256 _keepLQTY = keepLQTY;
-        address _liquityVoter = liquityVoter;
+        address _liquityVoter = address(liquityVoter);
         if (_keepLQTY > 0 && _liquityVoter != address(0)) {
-            uint256 lqtyBalance = crv.balanceOf(address(this));
+            uint256 lqtyBalance = lqty.balanceOf(address(this));
             uint256 _sendToVoter;
             unchecked {
                 _sendToVoter = (lqtyBalance * _keepLQTY) / FEE_DENOMINATOR;
             }
             if (_sendToVoter > 0) {
-                lqty.safeTransfer(_liquityVoter, _sendToVoter);
+                liquityVoter.strategyHarvest(_sendToVoter);
             }
         }
 
