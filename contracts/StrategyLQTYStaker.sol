@@ -30,7 +30,7 @@ interface ILiquityStaking {
     function stakes(address _user) external view returns (uint);
 }
 
-contract StrategyLQTYCompounder is BaseStrategy {
+contract StrategyLQTYStaker is BaseStrategy {
     using SafeERC20 for IERC20;
     /* ========== STATE VARIABLES ========== */
 
@@ -47,7 +47,10 @@ contract StrategyLQTYCompounder is BaseStrategy {
     uint256 internal constant FEE_DENOMINATOR = 10000;
 
     /// @notice Address of our main rewards token, LUSD
-    IERC20 public constant lusd = IERC20();
+    IERC20 public constant lusd = IERC20(0x5f98805A4E8be255a32880FDeC7F6728C6568bA0);
+    
+    /// @notice Convert our ether rewards into weth for easier swaps
+    IERC20 public constant weth = IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
 
     /// @notice Minimum profit size in USDC that we want to harvest.
     /// @dev Only used in harvestTrigger.
@@ -56,10 +59,6 @@ contract StrategyLQTYCompounder is BaseStrategy {
     /// @notice Maximum profit size in USDC that we want to harvest (ignore gas price once we get here).
     /// @dev Only used in harvestTrigger.
     uint256 public harvestProfitMaxInUsdc;
-    
-    /// @notice 
-    IERC20 internal constant weth =
-        IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
 
     // we use this to be able to adjust our strategy's name
     string internal stratName;
@@ -68,8 +67,8 @@ contract StrategyLQTYCompounder is BaseStrategy {
     /// @notice The address of our ySwaps trade factory.
     address public tradeFactory;
 
-    /// @notice Will only be true on the original deployed contract and not on clones; we don't want to clone a clone.
-    bool public isOriginal = true;
+    /// @notice Array of any rewards tokens used for our tradehandler.
+    address[] public rewardsTokens;
 
     /* ========== CONSTRUCTOR ========== */
 
