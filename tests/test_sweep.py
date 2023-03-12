@@ -1,6 +1,4 @@
 import brownie
-from brownie import Contract
-from brownie import config
 
 # test sweeping out tokens
 def test_sweep(
@@ -11,26 +9,24 @@ def test_sweep(
     whale,
     strategy,
     chain,
-    strategist_ms,
-    farmed,
+    to_sweep,
     amount,
+    strategy_harvest,
 ):
-
-    ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    # deposit to the vault after approving
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    chain.sleep(1)
-    strategy.harvest({"from": gov})
-    chain.sleep(1)
-    strategy.sweep(farmed, {"from": gov})
+    harvest_tx = strategy_harvest()
+    strategy.sweep(to_sweep, {"from": gov})
 
     # Strategy want token doesn't work
-    startingWhale = token.balanceOf(whale)
     token.transfer(strategy.address, amount, {"from": whale})
     assert token.address == strategy.want()
     assert token.balanceOf(strategy) > 0
     with brownie.reverts("!want"):
         strategy.sweep(token, {"from": gov})
+    with brownie.reverts():
+        strategy.sweep(to_sweep, {"from": whale})
 
     # Vault share token doesn't work
     with brownie.reverts("!shares"):
