@@ -2,6 +2,7 @@ import brownie
 from brownie import Contract
 from brownie import config
 import math
+from utils import harvest_strategy
 
 # test the our strategy's ability to deposit, harvest, and withdraw, with different optimal deposit tokens if we have them
 def test_simple_harvest(
@@ -16,16 +17,20 @@ def test_simple_harvest(
     sleep_time,
     is_slippery,
     no_profit,
-    strategy_harvest,
+    profit_whale,
+    profit_amount,
+    destination_strategy,
 ):
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     newWhale = token.balanceOf(whale)
 
     # harvest, store asset amount
-    harvest_report = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
     old_assets = vault.totalAssets()
     assert old_assets > 0
     assert token.balanceOf(strategy) == 0
@@ -37,7 +42,9 @@ def test_simple_harvest(
     chain.mine(1)
 
     # harvest, store new asset amount
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
 
     # sleep for 5 days to fully realize profits
     chain.sleep(5 * 86400)

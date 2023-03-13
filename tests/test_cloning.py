@@ -1,5 +1,6 @@
 import brownie
 import math
+from utils import harvest_strategy
 
 # make sure cloned strategy works just like normal
 def test_cloning(
@@ -21,6 +22,9 @@ def test_cloning(
     tests_using_tenderly,
     strategy_name,
     destination_vault,
+    profit_whale,
+    profit_amount,
+    destination_strategy,
 ):
 
     # skip this test if we don't clone
@@ -29,15 +33,15 @@ def test_cloning(
 
     ## deposit to the vault after approving like normal
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     chain.mine(1)
-    tx = strategy.harvest({'from': gov})
+    tx = strategy.harvest({"from": gov})
     chain.sleep(1)
     chain.mine(1)
     before_pps = vault.pricePerShare()
-    
+
     # clone our strategy
     tx = strategy.cloneRouterStrategy(
         vault,
@@ -89,16 +93,14 @@ def test_cloning(
 
     # revoke, get funds back into vault, remove old strat from queue
     vault.revokeStrategy(strategy, {"from": gov})
-    chain.sleep(1)
-    chain.mine(1)
-    tx = strategy.harvest({'from': gov})
-    chain.sleep(1)
-    chain.mine(1)
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
     vault.removeStrategyFromQueue(strategy.address, {"from": gov})
 
     # attach our new strategy, ensure it's the only one
     vault.addStrategy(
-        new_strategy.address, 10_000, 0, 2 ** 256 - 1, 1_000, {"from": gov}
+        new_strategy.address, 10_000, 0, 2**256 - 1, 1_000, {"from": gov}
     )
 
     assert vault.withdrawalQueue(0) == new_strategy.address
@@ -106,11 +108,15 @@ def test_cloning(
     assert vault.strategies(strategy)["debtRatio"] == 0
 
     # harvest, store asset amount
-    chain.sleep(1)
-    chain.mine(1)
-    tx = new_strategy.harvest({'from': gov})
-    chain.sleep(1)
-    chain.mine(1)
+    (profit, loss) = harvest_strategy(
+        True,
+        new_strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
+    )
     old_assets = vault.totalAssets()
     assert old_assets > 0
     assert token.balanceOf(new_strategy) == 0
@@ -124,11 +130,15 @@ def test_cloning(
     chain.mine(1)
 
     # harvest after a day, store new asset amount
-    chain.sleep(1)
-    chain.mine(1)
-    tx = new_strategy.harvest({'from': gov})
-    chain.sleep(1)
-    chain.mine(1)
+    (profit, loss) = harvest_strategy(
+        True,
+        new_strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
+    )
     new_assets = vault.totalAssets()
 
     # we can't use strategyEstimated Assets because the profits are sent to the vault

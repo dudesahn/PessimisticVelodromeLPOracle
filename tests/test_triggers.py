@@ -1,4 +1,5 @@
 import math
+from utils import harvest_strategy
 
 # test our harvest triggers
 def test_triggers(
@@ -13,13 +14,17 @@ def test_triggers(
     sleep_time,
     is_slippery,
     no_profit,
-    strategy_harvest,
+    profit_whale,
+    profit_amount,
+    destination_strategy,
     base_fee_oracle,
 ):
     # inactive strategy (0 DR and 0 assets) shouldn't be touched by keepers
     currentDebtRatio = vault.strategies(strategy)["debtRatio"]
     vault.updateStrategyDebtRatio(strategy, 0, {"from": gov})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
     tx = strategy.harvestTrigger(0, {"from": gov})
     print("\nShould we harvest? Should be false.", tx)
     assert tx == False
@@ -27,7 +32,7 @@ def test_triggers(
 
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     newWhale = token.balanceOf(whale)
     starting_assets = vault.totalAssets()
@@ -40,7 +45,9 @@ def test_triggers(
     strategy.setCreditThreshold(1e24, {"from": gov})
 
     # harvest the credit
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
 
     # should trigger false, nothing is ready yet
     tx = strategy.harvestTrigger(0, {"from": gov})
@@ -59,8 +66,10 @@ def test_triggers(
     strategy.setMaxReportDelay(86400 * 21)
 
     # harvest, wait
-    harvest_tx = strategy_harvest()
-    print("Harvest info:", harvest_tx.events["Harvested"])
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
+    print("Profit:", profit, "Loss:", loss)
     chain.sleep(sleep_time)
     chain.mine(1)
 

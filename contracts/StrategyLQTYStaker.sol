@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity ^0.8.15;
-pragma experimental ABIEncoderV2;
 
 // These are the core Yearn libraries
 import "@openzeppelin/contracts/utils/math/Math.sol";
-import "./interfaces/yearn.sol";
-import "./interfaces/curve.sol";
 import "@yearnvaults/contracts/BaseStrategy.sol";
 
 interface ITradeFactory {
@@ -20,6 +17,12 @@ interface IWeth {
 
 interface IVoter {
     function strategyHarvest(uint256) external;
+}
+
+interface IOracle {
+    function getPriceUsdcRecommended(
+        address tokenAddress
+    ) external view returns (uint256);
 }
 
 interface ILiquityStaking {
@@ -39,7 +42,8 @@ contract StrategyLQTYStaker is BaseStrategy {
     /* ========== STATE VARIABLES ========== */
 
     /// @notice LQTY staking contract
-    ILiquityStaking public lqtyStaking = ILiquityStaking(0x4f9Fbb3f1E99B56e0Fe2892e623Ed36A76Fc605d);
+    ILiquityStaking public lqtyStaking =
+        ILiquityStaking(0x4f9Fbb3f1E99B56e0Fe2892e623Ed36A76Fc605d);
 
     /// @notice The percentage of LQTY from each harvest that we send to yearn's secondary staker to boost yields.
     uint256 public keepLQTY;
@@ -51,10 +55,16 @@ contract StrategyLQTYStaker is BaseStrategy {
     uint256 internal constant FEE_DENOMINATOR = 10000;
 
     /// @notice Address of our main rewards token, LUSD
-    IERC20 public constant lusd = IERC20(0x5f98805A4E8be255a32880FDeC7F6728C6568bA0);
-    
+    IERC20 public constant lusd =
+        IERC20(0x5f98805A4E8be255a32880FDeC7F6728C6568bA0);
+
     /// @notice Convert our ether rewards into weth for easier swaps
-    IERC20 public constant weth = IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+    IERC20 public constant weth =
+        IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+
+    /// @notice LQTY token address.
+    IERC20 public constant lqty =
+        IERC20(0x4f9Fbb3f1E99B56e0Fe2892e623Ed36A76Fc605d);
 
     /// @notice Minimum profit size in USDC that we want to harvest.
     /// @dev Only used in harvestTrigger.
@@ -99,8 +109,8 @@ contract StrategyLQTYStaker is BaseStrategy {
         maxReportDelay = 365 days;
 
         // set up rewards and trade factory
-        address[] stakingRewards = [(address(weth), address(lusd)];
-        _updateRewards(stakingRewards);
+        rewardsTokens = [address(weth), address(lusd)];
+        _updateRewards(rewardsTokens);
         _setUpTradeFactory();
 
         // set our strategy's name
@@ -142,14 +152,14 @@ contract StrategyLQTYStaker is BaseStrategy {
         // if we have anything staked, harvest our rewards
         uint256 _stakedBal = stakedBalance();
         if (_stakedBal > 0) {
-            liquityStaking.unstake(0);
+            lqtyStaking.unstake(0);
             // convert our ether to weth if we have any
             uint256 ethBalance = address(this).balance;
             if (ethBalance > 0) {
                 IWeth(address(weth)).deposit{value: ethBalance}();
             }
         }
-        
+
         // send some LQTY to our voter and claim accrued yield from it
         uint256 _keepLQTY = keepLQTY;
         address _liquityVoter = address(liquityVoter);
@@ -225,9 +235,7 @@ contract StrategyLQTYStaker is BaseStrategy {
                     _neededFromStaked = _amountNeeded - _wantBal;
                 }
                 // withdraw whatever extra funds we need
-                lqtyStaking.unstake(
-                    Math.min(_stakedBal, _neededFromStaked)
-                );
+                lqtyStaking.unstake(Math.min(_stakedBal, _neededFromStaked));
             }
             uint256 _withdrawnBal = balanceOfWant();
             _liquidatedAmount = Math.min(_amountNeeded, _withdrawnBal);
@@ -250,10 +258,10 @@ contract StrategyLQTYStaker is BaseStrategy {
         return balanceOfWant();
     }
 
-    // migrate our want token to a new strategy if needed, as well as any LUSD or ether
+    // migrate our want token to a new strategy if needed, as well as any LUSD or WETH
     function prepareMigration(address _newStrategy) internal override {
-        uint256 stakedBal = stakedBalance();
-        if (stakedBal > 0) {
+        uint256 _stakedBal = stakedBalance();
+        if (_stakedBal > 0) {
             lqtyStaking.unstake(_stakedBal);
         }
         uint256 lusdBalance = lusd.balanceOf(address(this));
@@ -264,7 +272,8 @@ contract StrategyLQTYStaker is BaseStrategy {
         }
 
         if (ethBalance > 0) {
-            address(this).transfer(_newStrategy, ethBalance);
+            IWeth(address(weth)).deposit{value: ethBalance}();
+            weth.safeTransfer(_newStrategy, ethBalance);
         }
     }
 
@@ -285,10 +294,16 @@ contract StrategyLQTYStaker is BaseStrategy {
     function updateRewards(address[] memory _rewards) external onlyGovernance {
         address tf = tradeFactory;
         _removeTradeFactoryPermissions(true);
-        rewardsTokens = _rewards;
+        _updateRewards(_rewards);
 
         tradeFactory = tf;
         _setUpTradeFactory();
+    }
+
+    function _updateRewards(address[] memory _rewardsTokens) internal {
+        // empty the rewardsTokens and rebuild
+        delete rewardsTokens;
+        rewardsTokens = _rewardsTokens;
     }
 
     /// @notice Use to update our trade factory.
@@ -312,8 +327,6 @@ contract StrategyLQTYStaker is BaseStrategy {
         address _want = address(want);
 
         ITradeFactory tf = ITradeFactory(_tradeFactory);
-        crv.approve(_tradeFactory, type(uint256).max);
-        tf.enable(address(crv), _want);
 
         // enable for all rewards tokens too
         for (uint256 i; i < rewardsTokens.length; ++i) {
@@ -339,12 +352,7 @@ contract StrategyLQTYStaker is BaseStrategy {
             return;
         }
         ITradeFactory tf = ITradeFactory(_tradeFactory);
-
         address _want = address(want);
-        crv.approve(_tradeFactory, 0);
-        if (_disableTf) {
-            tf.disable(address(crv), _want);
-        }
 
         // disable for all rewards tokens too
         for (uint256 i; i < rewardsTokens.length; ++i) {
@@ -424,14 +432,13 @@ contract StrategyLQTYStaker is BaseStrategy {
             0x83d95e0D5f402511dB06817Aff3f9eA88224B030
         ); // yearn lens oracle
         uint256 lusdPrice = yearnOracle.getPriceUsdcRecommended(address(lusd));
-        uint256 etherPrice = yearnOracle.getPriceUsdcRecommended(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2); // use weth address
-        
+        uint256 etherPrice = yearnOracle.getPriceUsdcRecommended(address(weth));
+
         uint256 claimableLusd = lqtyStaking.getPendingLUSDGain(address(this));
         uint256 claimableETH = lqtyStaking.getPendingETHGain(address(this));
 
         // Oracle returns prices as 6 decimals, so multiply by claimable amount and divide by token decimals (1e18)
-        return
-            (lusdPrice * claimableLusd + etherPrice * claimableETH) / 1e18;
+        return (lusdPrice * claimableLusd + etherPrice * claimableETH) / 1e18;
     }
 
     /// @notice Convert our keeper's eth cost into want
@@ -449,24 +456,24 @@ contract StrategyLQTYStaker is BaseStrategy {
     // These functions are useful for setting parameters of the strategy that may need to be adjusted.
 
     /// @notice Use this to set or update our keep amounts for this strategy.
-    /// @dev Must be less than 10,000. Set in basis points. Only governance can set this.
-    /// @param _keepCrv Percent of each CRV harvest to send to our voter.
+    /// @dev Must be less than 1,000. Set in basis points. Only governance can set this.
+    /// @param _keepLqty Percent of LQTY from each harvest to send to our voter.
     function setKeepLqty(uint256 _keepLqty) external onlyGovernance {
         if (_keepLqty > 1000) {
             revert();
         }
-        if (_keepLqty > 0 && liquityVoter == address(0)) {
+        if (_keepLqty > 0 && address(liquityVoter) == address(0)) {
             revert();
         }
-        keepLqty = _keepLqty;
+        keepLQTY = _keepLqty;
     }
 
     /// @notice Use this to set or update our voter contracts.
-    /// @dev For Curve strategies, this is where we send our keepCVX.
+    /// @dev This is where we send our keepLQTY to compound rewards
     ///  Only governance can set this.
-    /// @param _curveVoter Address of our curve voter.
-    function setVoter(address _curveVoter) external onlyGovernance {
-        curveVoter = _curveVoter;
+    /// @param _voter Address of our liquity voter.
+    function setVoter(address _voter) external onlyGovernance {
+        liquityVoter = IVoter(_voter);
     }
 
     /**
@@ -476,16 +483,12 @@ contract StrategyLQTYStaker is BaseStrategy {
      *  that will trigger a harvest if gas price is acceptable.
      * @param _harvestProfitMaxInUsdc The amount of profit in USDC that
      *  will trigger a harvest regardless of gas price.
-     * @param _checkEarmark Whether or not we should check Convex's
-     *  booster to see if we need to earmark before harvesting.
      */
     function setHarvestTriggerParams(
         uint256 _harvestProfitMinInUsdc,
-        uint256 _harvestProfitMaxInUsdc,
-        bool _checkEarmark
+        uint256 _harvestProfitMaxInUsdc
     ) external onlyVaultManagers {
         harvestProfitMinInUsdc = _harvestProfitMinInUsdc;
         harvestProfitMaxInUsdc = _harvestProfitMaxInUsdc;
-        checkEarmark = _checkEarmark;
     }
 }

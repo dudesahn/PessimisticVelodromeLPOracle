@@ -39,7 +39,7 @@ def tenderly_fork(web3, chain):
 
 @pytest.fixture(scope="session")
 def token(interface):
-    token_address = "0xC25a3A3b969415c80451098fa907EC722572917F"  # this should be the address of the ERC-20 used by the strategy/vault (curve sUSD)
+    token_address = "0x6DEA81C8171D0bA574754EF6F8b412F2Ed88c54D"  # this should be the address of the ERC-20 used by the strategy/vault (LQTY)
     yield interface.IERC20(token_address)
 
 
@@ -48,8 +48,8 @@ def whale(accounts, amount, token):
     # Totally in it for the tech
     # Update this with a large holder of your want token (the largest EOA holder of LP)
     whale = accounts.at(
-        "0x6190e652462ee63420E45c9c554C22A3C9a694ec", force=True
-    )  # 0x6190e652462ee63420E45c9c554C22A3C9a694ec, SUSD pool, 140k tokens
+        "0x83b1eC6cc7D44bb9BA1A48c53AB0337cAE5A0DBe", force=True
+    )  # 0x83b1eC6cc7D44bb9BA1A48c53AB0337cAE5A0DBe, LQTY, 9.8m tokens
     if token.balanceOf(whale) < 2 * amount:
         raise ValueError(
             "Our whale needs more funds. Find another whale or reduce your amount variable."
@@ -67,8 +67,8 @@ def amount(token):
 def profit_whale(accounts, profit_amount, token):
     # ideally not the same whale as the main whale, or else they will lose money
     profit_whale = accounts.at(
-        "0x5BB622ba7b2F09BF23F1a9b509cd210A818c53d7", force=True
-    )  # 0x5BB622ba7b2F09BF23F1a9b509cd210A818c53d7, SUSD pool, 114k tokens
+        "0xD8c9D9071123a059C6E0A945cF0e0c82b508d816", force=True
+    )  # 0xD8c9D9071123a059C6E0A945cF0e0c82b508d816, LQTY, 8.7m tokens
     if token.balanceOf(profit_whale) < 5 * profit_amount:
         raise ValueError(
             "Our profit whale needs more funds. Find another whale or reduce your profit_amount variable."
@@ -85,35 +85,35 @@ def profit_amount(token):
 # set address if already deployed, use ZERO_ADDRESS if not
 @pytest.fixture(scope="session")
 def vault_address():
-    vault_address = "0x5a770DbD3Ee6bAF2802D29a901Ef11501C44797A"
+    vault_address = ZERO_ADDRESS
     yield vault_address
 
 
 # this is the name we want to give our strategy
 @pytest.fixture(scope="session")
 def strategy_name():
-    strategy_name = "RouterStrategy046"
+    strategy_name = "StrategyLQTYStaker"
     yield strategy_name
 
 
 # this is the name of our strategy in the .sol file
 @pytest.fixture(scope="session")
-def contract_name(RouterStrategy):
-    contract_name = RouterStrategy
+def contract_name(StrategyLQTYStaker):
+    contract_name = StrategyLQTYStaker
     yield contract_name
 
 
 # if our strategy is using ySwaps, then we need to donate profit to it from our profit whale
 @pytest.fixture(scope="session")
 def use_yswaps():
-    use_yswaps = False
+    use_yswaps = True
     yield use_yswaps
 
 
 # whether or not a strategy is clonable. if true, don't forget to update what our cloning function is called in test_cloning.py
 @pytest.fixture(scope="session")
 def is_clonable():
-    is_clonable = True
+    is_clonable = False
     yield is_clonable
 
 
@@ -128,7 +128,7 @@ def no_profit():
 # generally this will always be true if no_profit is true, even for curve/convex since we can lose a wei converting
 @pytest.fixture(scope="session")
 def is_slippery(no_profit):
-    is_slippery = True  # set this to true or false as needed
+    is_slippery = False  # set this to true or false as needed
     if no_profit:
         is_slippery = True
     yield is_slippery
@@ -204,6 +204,10 @@ if chain_used == 1:  # mainnet
         # token we can sweep out of strategy (use CRV)
         yield interface.IERC20("0xD533a949740bb3306d119CC777fa900bA034cd52")
 
+    @pytest.fixture(scope="session")
+    def trade_factory():
+        yield Contract("0xcADBA199F3AC26F67f660C89d43eB1820b7f7a3b")
+
 
 @pytest.fixture(scope="module")
 def vault(pm, gov, rewards, guardian, management, token, vault_address, interface):
@@ -211,7 +215,7 @@ def vault(pm, gov, rewards, guardian, management, token, vault_address, interfac
         Vault = pm(config["dependencies"][0]).Vault
         vault = guardian.deploy(Vault)
         vault.initialize(token, gov, rewards, "", "", guardian)
-        vault.setDepositLimit(2 ** 256 - 1, {"from": gov})
+        vault.setDepositLimit(2**256 - 1, {"from": gov})
         vault.setManagement(management, {"from": gov})
     else:
         vault = interface.IVaultFactory045(vault_address)
@@ -229,7 +233,6 @@ def strategy(
     keeper,
     vault,
     destination_vault,
-    RouterStrategy,
     gov,
     management,
     health_check,
@@ -238,8 +241,11 @@ def strategy(
     base_fee_oracle,
     vault_address,
     interface,
+    trade_factory,
 ):
-    strategy = strategist.deploy(contract_name, vault, destination_vault, strategy_name)
+    # will need to update this based on the strategy's constructor ******
+    strategy = gov.deploy(contract_name, vault, trade_factory, 10_000e6, 50_000e6)
+
     strategy.setKeeper(keeper, {"from": gov})
     strategy.setHealthCheck(health_check, {"from": gov})
     strategy.setDoHealthCheck(True, {"from": gov})
@@ -258,7 +264,7 @@ def strategy(
                 interface.ICurveStrategy045(strat_address).harvest({"from": gov})
                 vault.removeStrategyFromQueue(strat_address, {"from": gov})
 
-    vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
+    vault.addStrategy(strategy, 10_000, 0, 2**256 - 1, 0, {"from": gov})
 
     # turn our oracle into testing mode by setting the provider to 0x00, then forcing true
     strategy.setBaseFeeOracle(base_fee_oracle, {"from": management})

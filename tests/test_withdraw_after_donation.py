@@ -1,6 +1,7 @@
 import brownie
 from brownie import chain, Contract, ZERO_ADDRESS
 import math
+from utils import harvest_strategy
 
 # these tests all assess whether a strategy will hit accounting errors following donations to the strategy.
 # lower debtRatio to 50%, donate, withdraw less than the donation, then harvest
@@ -16,13 +17,17 @@ def test_withdraw_after_donation_1(
     sleep_time,
     is_slippery,
     no_profit,
-    strategy_harvest,
+    profit_whale,
+    profit_amount,
+    destination_strategy,
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
     prev_params = vault.strategies(strategy)
     currentDebt = vault.strategies(strategy)["debtRatio"]
     vault.updateStrategyDebtRatio(strategy, currentDebt / 2, {"from": gov})
@@ -39,7 +44,9 @@ def test_withdraw_after_donation_1(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
     new_params = vault.strategies(strategy)
 
     # sleep 5 days to allow share price to normalize
@@ -86,13 +93,17 @@ def test_withdraw_after_donation_2(
     sleep_time,
     is_slippery,
     no_profit,
-    strategy_harvest,
+    profit_whale,
+    profit_amount,
+    destination_strategy,
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
     prev_params = vault.strategies(strategy)
 
     currentDebt = vault.strategies(strategy)["debtRatio"]
@@ -112,7 +123,9 @@ def test_withdraw_after_donation_2(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
     new_params = vault.strategies(strategy)
 
     # sleep 5 days to allow share price to normalize
@@ -159,13 +172,17 @@ def test_withdraw_after_donation_3(
     sleep_time,
     is_slippery,
     no_profit,
-    strategy_harvest,
+    profit_whale,
+    profit_amount,
+    destination_strategy,
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
 
     prev_params = vault.strategies(strategy)
 
@@ -190,7 +207,9 @@ def test_withdraw_after_donation_3(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
     new_params = vault.strategies(strategy)
 
     # sleep 5 days to allow share price to normalize
@@ -237,13 +256,17 @@ def test_withdraw_after_donation_4(
     sleep_time,
     is_slippery,
     no_profit,
-    strategy_harvest,
+    profit_whale,
+    profit_amount,
+    destination_strategy,
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
 
     prev_params = vault.strategies(strategy)
 
@@ -268,7 +291,9 @@ def test_withdraw_after_donation_4(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
     new_params = vault.strategies(strategy)
 
     # sleep 5 days to allow share price to normalize
@@ -318,13 +343,17 @@ def test_withdraw_after_donation_5(
     sleep_time,
     is_slippery,
     no_profit,
-    strategy_harvest,
+    profit_whale,
+    profit_amount,
+    destination_strategy,
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
 
     prev_params = vault.strategies(strategy)
 
@@ -345,7 +374,9 @@ def test_withdraw_after_donation_5(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
     new_params = vault.strategies(strategy)
 
     # sleep 5 days to allow share price to normalize
@@ -392,13 +423,17 @@ def test_withdraw_after_donation_6(
     sleep_time,
     is_slippery,
     no_profit,
-    strategy_harvest,
+    profit_whale,
+    profit_amount,
+    destination_strategy,
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
 
     prev_params = vault.strategies(strategy)
 
@@ -415,7 +450,9 @@ def test_withdraw_after_donation_6(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
     new_params = vault.strategies(strategy)
 
     # sleep 5 days to allow share price to normalize
@@ -462,14 +499,18 @@ def test_withdraw_after_donation_7(
     sleep_time,
     is_slippery,
     no_profit,
-    strategy_harvest,
+    profit_whale,
+    profit_amount,
+    destination_strategy,
     vault_address,
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
 
     prev_params = vault.strategies(strategy)
     prev_assets = vault.totalAssets()
@@ -500,7 +541,9 @@ def test_withdraw_after_donation_7(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
 
     # check everywhere to make sure we emptied out the strategy
     if is_slippery:
@@ -565,14 +608,18 @@ def test_withdraw_after_donation_8(
     sleep_time,
     is_slippery,
     no_profit,
-    strategy_harvest,
+    profit_whale,
+    profit_amount,
+    destination_strategy,
     vault_address,
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
 
     prev_params = vault.strategies(strategy)
     prev_assets = vault.totalAssets()
@@ -603,7 +650,9 @@ def test_withdraw_after_donation_8(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(
+        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+    )
 
     # check everywhere to make sure we emptied out the strategy
     if is_slippery:
