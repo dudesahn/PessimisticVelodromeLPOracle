@@ -16,7 +16,7 @@ interface IWeth {
 }
 
 interface IVoter {
-    function strategyHarvest(uint256) external;
+    function strategyHarvest() external;
 }
 
 interface IOracle {
@@ -64,7 +64,7 @@ contract StrategyLQTYStaker is BaseStrategy {
 
     /// @notice LQTY token address.
     IERC20 public constant lqty =
-        IERC20(0x4f9Fbb3f1E99B56e0Fe2892e623Ed36A76Fc605d);
+        IERC20(0x6DEA81C8171D0bA574754EF6F8b412F2Ed88c54D);
 
     /// @notice Minimum profit size in USDC that we want to harvest.
     /// @dev Only used in harvestTrigger.
@@ -113,6 +113,9 @@ contract StrategyLQTYStaker is BaseStrategy {
         _updateRewards(rewardsTokens);
         _setUpTradeFactory();
 
+        // set keep to 5%
+        keepLQTY = 500;
+
         // set our strategy's name
         stratName = "StrategyLQTYCompounder";
     }
@@ -149,15 +152,16 @@ contract StrategyLQTYStaker is BaseStrategy {
         returns (uint256 _profit, uint256 _loss, uint256 _debtPayment)
     {
         // rewards will be converted later with mev protection by yswaps (tradeFactory)
-        // if we have anything staked, harvest our rewards
+        // if we have anything staked, harvest our rewards. can't claim rewards without a stake.
         uint256 _stakedBal = stakedBalance();
         if (_stakedBal > 0) {
             lqtyStaking.unstake(0);
-            // convert our ether to weth if we have any
-            uint256 ethBalance = address(this).balance;
-            if (ethBalance > 0) {
-                IWeth(address(weth)).deposit{value: ethBalance}();
-            }
+        }
+
+        // convert our ether to weth if we have any
+        uint256 ethBalance = address(this).balance;
+        if (ethBalance > 0) {
+            IWeth(address(weth)).deposit{value: ethBalance}();
         }
 
         // send some LQTY to our voter and claim accrued yield from it
@@ -170,7 +174,8 @@ contract StrategyLQTYStaker is BaseStrategy {
                 _sendToVoter = (lqtyBalance * _keepLQTY) / FEE_DENOMINATOR;
             }
             if (_sendToVoter > 0) {
-                liquityVoter.strategyHarvest(_sendToVoter);
+                lqty.safeTransfer(_liquityVoter, _sendToVoter);
+                liquityVoter.strategyHarvest();
             }
         }
 

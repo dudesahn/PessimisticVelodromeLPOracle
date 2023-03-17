@@ -1,5 +1,5 @@
 import pytest
-from brownie import config, Contract, ZERO_ADDRESS, chain, interface
+from brownie import config, Contract, ZERO_ADDRESS, chain, interface, accounts
 from eth_abi import encode_single
 import requests
 
@@ -38,13 +38,13 @@ def tenderly_fork(web3, chain):
 
 
 @pytest.fixture(scope="session")
-def token(interface):
+def token():
     token_address = "0x6DEA81C8171D0bA574754EF6F8b412F2Ed88c54D"  # this should be the address of the ERC-20 used by the strategy/vault (LQTY)
     yield interface.IERC20(token_address)
 
 
 @pytest.fixture(scope="session")
-def whale(accounts, amount, token):
+def whale(amount, token):
     # Totally in it for the tech
     # Update this with a large holder of your want token (the largest EOA holder of LP)
     whale = accounts.at(
@@ -64,7 +64,7 @@ def amount(token):
 
 
 @pytest.fixture(scope="session")
-def profit_whale(accounts, profit_amount, token):
+def profit_whale(profit_amount, token):
     # ideally not the same whale as the main whale, or else they will lose money
     profit_whale = accounts.at(
         "0xD8c9D9071123a059C6E0A945cF0e0c82b508d816", force=True
@@ -78,7 +78,7 @@ def profit_whale(accounts, profit_amount, token):
 
 @pytest.fixture(scope="session")
 def profit_amount(token):
-    profit_amount = 500 * 10 ** token.decimals()
+    profit_amount = 50 * 10 ** token.decimals()
     yield profit_amount
 
 
@@ -87,6 +87,13 @@ def profit_amount(token):
 def vault_address():
     vault_address = ZERO_ADDRESS
     yield vault_address
+
+
+# if our vault is pre-0.4.3, this will affect a few things
+@pytest.fixture(scope="session")
+def old_vault():
+    old_vault = False
+    yield old_vault
 
 
 # this is the name we want to give our strategy
@@ -167,20 +174,20 @@ def RELATIVE_APPROX():
 if chain_used == 1:  # mainnet
 
     @pytest.fixture(scope="session")
-    def gov(accounts):
+    def gov():
         yield accounts.at("0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52", force=True)
 
     @pytest.fixture(scope="session")
-    def health_check(interface):
+    def health_check():
         yield interface.IHealthCheck("0xddcea799ff1699e98edf118e0629a974df7df012")
 
     @pytest.fixture(scope="session")
-    def base_fee_oracle(interface):
+    def base_fee_oracle():
         yield interface.IBaseFeeOracle("0xfeCA6895DcF50d6350ad0b5A8232CF657C316dA7")
 
     # set all of the following to SMS, just simpler
     @pytest.fixture(scope="session")
-    def management(accounts):
+    def management():
         yield accounts.at("0x16388463d60FFE0661Cf7F1f31a7D658aC790ff7", force=True)
 
     @pytest.fixture(scope="session")
@@ -200,7 +207,7 @@ if chain_used == 1:  # mainnet
         yield management
 
     @pytest.fixture(scope="session")
-    def to_sweep(interface):
+    def to_sweep():
         # token we can sweep out of strategy (use CRV)
         yield interface.IERC20("0xD533a949740bb3306d119CC777fa900bA034cd52")
 
@@ -208,14 +215,18 @@ if chain_used == 1:  # mainnet
     def trade_factory():
         yield Contract("0xcADBA199F3AC26F67f660C89d43eB1820b7f7a3b")
 
+    @pytest.fixture(scope="session")
+    def keeper_wrapper():
+        yield Contract("0x0D26E894C2371AB6D20d99A65E991775e3b5CAd7")
+
 
 @pytest.fixture(scope="module")
-def vault(pm, gov, rewards, guardian, management, token, vault_address, interface):
+def vault(pm, gov, rewards, guardian, management, token, vault_address):
     if vault_address == ZERO_ADDRESS:
         Vault = pm(config["dependencies"][0]).Vault
         vault = guardian.deploy(Vault)
         vault.initialize(token, gov, rewards, "", "", guardian)
-        vault.setDepositLimit(2**256 - 1, {"from": gov})
+        vault.setDepositLimit(2 ** 256 - 1, {"from": gov})
         vault.setManagement(management, {"from": gov})
     else:
         vault = interface.IVaultFactory045(vault_address)
@@ -232,7 +243,6 @@ def strategy(
     strategist,
     keeper,
     vault,
-    destination_vault,
     gov,
     management,
     health_check,
@@ -240,7 +250,6 @@ def strategy(
     strategy_name,
     base_fee_oracle,
     vault_address,
-    interface,
     trade_factory,
 ):
     # will need to update this based on the strategy's constructor ******
@@ -264,7 +273,7 @@ def strategy(
                 interface.ICurveStrategy045(strat_address).harvest({"from": gov})
                 vault.removeStrategyFromQueue(strat_address, {"from": gov})
 
-    vault.addStrategy(strategy, 10_000, 0, 2**256 - 1, 0, {"from": gov})
+    vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
 
     # turn our oracle into testing mode by setting the provider to 0x00, then forcing true
     strategy.setBaseFeeOracle(base_fee_oracle, {"from": management})
@@ -280,13 +289,27 @@ def strategy(
 ####################         PUT UNIQUE FIXTURES FOR THIS REPO BELOW         ####################
 
 
-@pytest.fixture(scope="session")
-def destination_vault(interface):
-    # destination vault of the route
-    yield interface.IVaultFactory045("0x5b2384D566D2E4a0b29B8eccB642C63199cd393c")
+@pytest.fixture
+def voter(
+    yLQTYVoter,
+    strategy,
+    gov,
+    rewards,
+    guardian,
+    management,
+    token,
+    vault_address,
+):
+    voter = gov.deploy(yLQTYVoter, strategy)
+    yield voter
 
 
 @pytest.fixture(scope="session")
-def destination_strategy(interface):
+def lusd_whale():
+    return accounts.at("0x99C9fc46f92E8a1c0deC1b1747d010903E884bE1", force=True)
+
+
+@pytest.fixture(scope="session")
+def destination_strategy():
     # destination strategy of the route
     yield interface.ICurveStrategy045("0x83D0458e627cFD7C6d0da12a1223bd168e1c8B64")

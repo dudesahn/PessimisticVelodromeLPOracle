@@ -9,7 +9,6 @@ def test_simple_harvest(
     gov,
     token,
     vault,
-    strategist,
     whale,
     strategy,
     chain,
@@ -20,16 +19,23 @@ def test_simple_harvest(
     profit_whale,
     profit_amount,
     destination_strategy,
+    use_yswaps,
 ):
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     newWhale = token.balanceOf(whale)
 
     # harvest, store asset amount
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
     old_assets = vault.totalAssets()
     assert old_assets > 0
@@ -43,8 +49,29 @@ def test_simple_harvest(
 
     # harvest, store new asset amount
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
+    # record this here so it isn't affected if we donate via ySwaps
+    strategy_assets = strategy.estimatedTotalAssets()
+
+    # harvest again so the strategy reports the profit
+    if use_yswaps:
+        print("Using ySwaps for harvests")
+        (profit, loss) = harvest_strategy(
+            use_yswaps,
+            strategy,
+            token,
+            gov,
+            profit_whale,
+            profit_amount,
+            destination_strategy,
+        )
 
     # sleep for 5 days to fully realize profits
     chain.sleep(5 * 86400)
@@ -57,8 +84,7 @@ def test_simple_harvest(
     print(
         "\nEstimated APR: ",
         "{:.2%}".format(
-            ((new_assets - old_assets) * (365 * 86400 / sleep_time))
-            / (strategy.estimatedTotalAssets())
+            ((new_assets - old_assets) * (365 * 86400 / sleep_time)) / (strategy_assets)
         ),
     )
 

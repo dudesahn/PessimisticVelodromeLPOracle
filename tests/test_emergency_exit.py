@@ -19,26 +19,58 @@ def test_emergency_exit(
     profit_whale,
     profit_amount,
     destination_strategy,
+    use_yswaps,
 ):
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
 
     # simulate earnings
     chain.sleep(sleep_time)
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
 
     # set emergency and exit, then confirm that the strategy has no funds
     strategy.setEmergencyExit({"from": gov})
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
+
+    # yswaps needs another harvest to get the final bit of profit to the vault
+    if use_yswaps:
+        (profit, loss) = harvest_strategy(
+            use_yswaps,
+            strategy,
+            token,
+            gov,
+            profit_whale,
+            profit_amount,
+            destination_strategy,
+        )
+
     assert strategy.estimatedTotalAssets() == 0
 
     # simulate 5 days of waiting for share price to bump back up
@@ -71,29 +103,60 @@ def test_emergency_exit_with_profit(
     profit_whale,
     profit_amount,
     destination_strategy,
+    use_yswaps,
 ):
     ## deposit to the vault after approving. turn off health check since we're doing weird shit
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
 
     # simulate earnings
     chain.sleep(sleep_time)
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
 
     # set emergency and exit, then confirm that the strategy has no funds
-    donation = amount / 2
+    donation = amount
     token.transfer(strategy, donation, {"from": whale})
     strategy.setDoHealthCheck(False, {"from": gov})
     strategy.setEmergencyExit({"from": gov})
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
+
+    # yswaps needs another harvest to get the final bit of profit to the vault
+    if use_yswaps:
+        (profit, loss) = harvest_strategy(
+            use_yswaps,
+            strategy,
+            token,
+            gov,
+            profit_whale,
+            profit_amount,
+            destination_strategy,
+        )
     assert strategy.estimatedTotalAssets() == 0
 
     # simulate 5 days of waiting for share price to bump back up
@@ -123,18 +186,25 @@ def test_emergency_exit_with_loss(
     is_slippery,
     no_profit,
     sleep_time,
-    destination_vault,
     profit_whale,
     profit_amount,
     destination_strategy,
+    use_yswaps,
+    old_vault,
 ):
     ## deposit to the vault after approving. turn off health check since we're doing weird shit
     strategy.setDoHealthCheck(False, {"from": gov})
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
 
     # send all funds away, need to update this based on strategy
@@ -144,24 +214,35 @@ def test_emergency_exit_with_loss(
     assert strategy.estimatedTotalAssets() == 0
 
     # our whale donates 1 wei to the vault so we don't divide by zero (needed for older vaults)
-    token.transfer(strategy, 1, {"from": whale})
+    if old_vault:
+        token.transfer(strategy, 1, {"from": whale})
 
     # set emergency and exit, then confirm that the strategy has no funds
     strategy.setEmergencyExit({"from": gov})
     strategy.setDoHealthCheck(False, {"from": gov})
-    chain.sleep(1)
-    chain.mine(1)
-    tx = strategy.harvest({"from": gov})
-    chain.sleep(1)
-    chain.mine(1)
+    (profit, loss) = harvest_strategy(
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
+    )
     assert strategy.estimatedTotalAssets() == 0
+
+    if old_vault:
+        assert vault.totalAssets() == 1
+    else:
+        assert vault.totalAssets() == 0
 
     # simulate 5 days of waiting for share price to bump back up
     chain.sleep(86400 * 5)
     chain.mine(1)
 
-    # withdraw and see how down bad we are
+    # withdraw and see how down bad we are, confirm we can withdraw from an empty vault
     vault.withdraw({"from": whale})
+
     print(
         "Raw loss:",
         (startingWhale - token.balanceOf(whale)) / 1e18,
@@ -183,19 +264,25 @@ def test_emergency_exit_with_no_loss(
     is_slippery,
     no_profit,
     sleep_time,
-    destination_vault,
     profit_whale,
     profit_amount,
     destination_strategy,
+    use_yswaps,
 ):
     ## deposit to the vault after approving. turn off health check since we're doing weird shit
     strategy.setDoHealthCheck(False, {"from": gov})
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     depositSharePrice = vault.pricePerShare()
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
 
     # send all funds away, need to update this based on strategy
@@ -213,7 +300,13 @@ def test_emergency_exit_with_no_loss(
     strategy.setEmergencyExit({"from": gov})
     strategy.setDoHealthCheck(False, {"from": gov})
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
     assert loss == 0
     assert strategy.estimatedTotalAssets() == 0
@@ -229,12 +322,12 @@ def test_emergency_exit_with_no_loss(
     print("Whale profit from other strat PPS increase:", whale_profit / 1e18)
     vault.withdraw({"from": whale})
     profit = token.balanceOf(whale) - startingWhale
-    if no_profit and is_slippery:
+    if no_profit and is_slippery or use_yswaps:
         assert math.isclose(
             whale_profit, token.balanceOf(whale) - startingWhale, abs_tol=10
         )
     else:
-        assert profit > -5  # allow for some slippage here
+        assert profit > 0  # allow for some slippage here
     print("Whale profit, should be low:", profit / 1e18)
 
 
@@ -253,19 +346,32 @@ def test_emergency_shutdown_from_vault(
     profit_whale,
     profit_amount,
     destination_strategy,
+    use_yswaps,
 ):
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
 
     # simulate earnings
     chain.sleep(sleep_time)
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
 
     # simulate earnings
@@ -274,8 +380,27 @@ def test_emergency_shutdown_from_vault(
     # set emergency and exit, then confirm that the strategy has no funds
     vault.setEmergencyShutdown(True, {"from": gov})
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
+
+    # harvest again to get the last of our profit with ySwaps
+    if use_yswaps:
+        (profit, loss) = harvest_strategy(
+            use_yswaps,
+            strategy,
+            token,
+            gov,
+            profit_whale,
+            profit_amount,
+            destination_strategy,
+        )
+
     assert math.isclose(strategy.estimatedTotalAssets(), 0, abs_tol=5)
 
     # simulate 5 days of waiting for share price to bump back up

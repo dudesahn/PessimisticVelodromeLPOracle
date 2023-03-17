@@ -21,10 +21,10 @@ def test_cloning(
     is_clonable,
     tests_using_tenderly,
     strategy_name,
-    destination_vault,
     profit_whale,
     profit_amount,
     destination_strategy,
+    use_yswaps,
 ):
 
     # skip this test if we don't clone
@@ -33,13 +33,17 @@ def test_cloning(
 
     ## deposit to the vault after approving like normal
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    chain.sleep(1)
-    chain.mine(1)
-    tx = strategy.harvest({"from": gov})
-    chain.sleep(1)
-    chain.mine(1)
+    (profit, loss) = harvest_strategy(
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
+    )
     before_pps = vault.pricePerShare()
 
     # clone our strategy
@@ -94,13 +98,19 @@ def test_cloning(
     # revoke, get funds back into vault, remove old strat from queue
     vault.revokeStrategy(strategy, {"from": gov})
     (profit, loss) = harvest_strategy(
-        True, strategy, token, gov, profit_whale, profit_amount, destination_strategy
+        use_yswaps,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        destination_strategy,
     )
     vault.removeStrategyFromQueue(strategy.address, {"from": gov})
 
     # attach our new strategy, ensure it's the only one
     vault.addStrategy(
-        new_strategy.address, 10_000, 0, 2**256 - 1, 1_000, {"from": gov}
+        new_strategy.address, 10_000, 0, 2 ** 256 - 1, 1_000, {"from": gov}
     )
 
     assert vault.withdrawalQueue(0) == new_strategy.address
@@ -109,7 +119,7 @@ def test_cloning(
 
     # harvest, store asset amount
     (profit, loss) = harvest_strategy(
-        True,
+        use_yswaps,
         new_strategy,
         token,
         gov,
@@ -131,7 +141,7 @@ def test_cloning(
 
     # harvest after a day, store new asset amount
     (profit, loss) = harvest_strategy(
-        True,
+        use_yswaps,
         new_strategy,
         token,
         gov,
