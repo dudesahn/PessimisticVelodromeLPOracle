@@ -1,20 +1,16 @@
 import brownie
-from brownie import Contract, ZERO_ADDRESS, config, interface, accounts
-import math
+from brownie import ZERO_ADDRESS, interface, chain
 from utils import harvest_strategy
 
-# test our permissionless swaps and our trade handler stuff in this file
+# test our permissionless swaps and our trade handler functions as intended
 def test_keepers_and_trade_handler(
     gov,
     token,
     vault,
     whale,
     strategy,
-    chain,
     amount,
     sleep_time,
-    is_slippery,
-    no_profit,
     profit_whale,
     profit_amount,
     destination_strategy,
@@ -24,7 +20,7 @@ def test_keepers_and_trade_handler(
     lusd_whale,
 ):
     ## deposit to the vault after approving
-    startingWhale = token.balanceOf(whale)
+    starting_whale = token.balanceOf(whale)
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     newWhale = token.balanceOf(whale)
@@ -59,8 +55,9 @@ def test_keepers_and_trade_handler(
     strategy.setKeeper(keeper_wrapper, {"from": gov})
 
     # here we make sure we can harvest through our keeper wrapper
-    tx = keeper_wrapper.harvest(strategy, {"from": profit_whale})
+    keeper_wrapper.harvest(strategy, {"from": profit_whale})
 
+    ####### ADD LOGIC AS NEEDED FOR SENDING REWARDS TO STRATEGY #######
     # send our strategy some LUSD. normally it would be sitting waiting for trade handler but we automatically process it
     lusd = interface.IERC20(strategy.lusd())
     lusd.transfer(strategy, 100e18, {"from": lusd_whale})
@@ -75,9 +72,9 @@ def test_keepers_and_trade_handler(
         strategy, whale, lusd.balanceOf(strategy) / 2, {"from": trade_factory}
     )
 
+    # remove our trade handler
     strategy.removeTradeFactoryPermissions(True, {"from": gov})
     assert strategy.tradeFactory() == ZERO_ADDRESS
-
     assert lusd.balanceOf(strategy) > 0
 
     # trade factory now cant sweep
@@ -86,14 +83,13 @@ def test_keepers_and_trade_handler(
             strategy, whale, lusd.balanceOf(strategy) / 2, {"from": trade_factory}
         )
 
-    # change permissions
+    # give back those permissions, now trade factory can sweep
     strategy.updateTradeFactory(trade_factory, {"from": gov})
-
     lusd.transferFrom(
         strategy, whale, lusd.balanceOf(strategy) / 2, {"from": trade_factory}
     )
 
-    # do it twice to hit both arms of the if statement
+    # remove again!
     strategy.removeTradeFactoryPermissions(False, {"from": gov})
 
     # update again

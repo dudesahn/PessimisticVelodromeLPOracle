@@ -1,8 +1,7 @@
 import brownie
 from brownie import chain, Contract, ZERO_ADDRESS, accounts
-import math
+import pytest
 from utils import harvest_strategy
-import time
 
 # test our harvest triggers
 def test_triggers(
@@ -40,8 +39,8 @@ def test_triggers(
     assert tx == False
     vault.updateStrategyDebtRatio(strategy, currentDebtRatio, {"from": gov})
 
-    ## deposit to the vault after approving
-    startingWhale = token.balanceOf(whale)
+    ## deposit to the vault after approving, no harvest yet
+    starting_whale = token.balanceOf(whale)
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     newWhale = token.balanceOf(whale)
@@ -60,10 +59,6 @@ def test_triggers(
     print("\nShould we harvest? Should be true.", tx)
     assert tx == True
 
-    # simulate earnings
-    chain.sleep(sleep_time)
-    chain.mine(1)
-
     # harvest the credit
     (profit, loss) = harvest_strategy(
         use_yswaps,
@@ -75,17 +70,16 @@ def test_triggers(
         destination_strategy,
     )
 
-    # should trigger false, nothing is ready yet
+    # should trigger false, nothing is ready yet, just harvested
     tx = strategy.harvestTrigger(0, {"from": gov})
     print("\nShould we harvest? Should be false.", tx)
     assert tx == False
 
     # simulate earnings
     chain.sleep(sleep_time)
-    chain.mine(1)
 
     ################# GENERATE CLAIMABLE PROFIT HERE AS NEEDED #################
-    # we simulate minting LUSD fees from liquity's borrower operations to the staking contract
+    # we simulate minting LUSD fees from liquity's borrower operations to the staking contract so we have claimable yield
     lusd_borrower = accounts.at(
         "0xaC5406AEBe35A27691D62bFb80eeFcD7c0093164", force=True
     )
@@ -98,12 +92,11 @@ def test_triggers(
     after = staking.getPendingLUSDGain(lusd_borrower)
     assert after > before
 
-    # check that we have claimable profit
+    # check that we have claimable profit, need this for min and max profit checks below
     claimable_profit = strategy.claimableProfitInUsdc()
     assert claimable_profit > 0
     claimable_lusd = staking.getPendingLUSDGain(strategy)
-    print("Claimable LUSD:", claimable_lusd / 1e18)
-    print("Claimable Profit in USDC:", claimable_profit / 1e6)
+    assert claimable_lusd > 0
 
     if not (is_slippery and no_profit):
         # update our minProfit so our harvest triggers true
@@ -138,7 +131,6 @@ def test_triggers(
     )
     print("Profit:", profit, "Loss:", loss)
     chain.sleep(sleep_time)
-    chain.mine(1)
 
     # harvest should trigger false because of oracle
     base_fee_oracle.setManualBaseFeeBool(False, {"from": gov})
@@ -155,8 +147,7 @@ def test_triggers(
     vault.withdraw({"from": whale})
     if is_slippery and no_profit:
         assert (
-            math.isclose(token.balanceOf(whale), startingWhale, abs_tol=10)
-            or token.balanceOf(whale) >= startingWhale
+            pytest.approx(token.balanceOf(whale), rel=RELATIVE_APPROX) == starting_whale
         )
     else:
-        assert token.balanceOf(whale) >= startingWhale
+        assert token.balanceOf(whale) >= starting_whale

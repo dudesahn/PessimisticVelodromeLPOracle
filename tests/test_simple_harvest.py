@@ -1,8 +1,6 @@
-import brownie
-from brownie import Contract
-from brownie import config
-import math
+from brownie import chain
 from utils import harvest_strategy
+import pytest
 
 # test the our strategy's ability to deposit, harvest, and withdraw, with different optimal deposit tokens if we have them
 def test_simple_harvest(
@@ -11,7 +9,6 @@ def test_simple_harvest(
     vault,
     whale,
     strategy,
-    chain,
     amount,
     sleep_time,
     is_slippery,
@@ -22,7 +19,7 @@ def test_simple_harvest(
     use_yswaps,
 ):
     ## deposit to the vault after approving
-    startingWhale = token.balanceOf(whale)
+    starting_whale = token.balanceOf(whale)
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     newWhale = token.balanceOf(whale)
@@ -41,11 +38,9 @@ def test_simple_harvest(
     assert old_assets > 0
     assert token.balanceOf(strategy) == 0
     assert strategy.estimatedTotalAssets() > 0
-    print("Starting Assets: ", old_assets / 1e18)
 
     # simulate profits
     chain.sleep(sleep_time)
-    chain.mine(1)
 
     # harvest, store new asset amount
     (profit, loss) = harvest_strategy(
@@ -73,12 +68,18 @@ def test_simple_harvest(
             destination_strategy,
         )
 
-    # sleep for 5 days to fully realize profits
-    chain.sleep(5 * 86400)
-    chain.mine(1)
+    # evaluate our current total assets
     new_assets = vault.totalAssets()
-    assert new_assets >= old_assets
-    print("\nAssets after sleep time: ", new_assets / 1e18)
+
+    # confirm we made money, or at least that we have about the same
+    if is_slippery and no_profit:
+        assert pytest.approx(new_assets, rel=RELATIVE_APPROX) == old_assets
+    else:
+        new_assets >= old_assets
+
+    # simulate five days of waiting for share price to bump back up
+    chain.sleep(86400 * 5)
+    chain.mine(1)
 
     # Display estimated APR
     print(
@@ -89,11 +90,10 @@ def test_simple_harvest(
     )
 
     # withdraw and confirm we made money, or at least that we have about the same
-    tx = vault.withdraw({"from": whale})
+    vault.withdraw({"from": whale})
     if is_slippery and no_profit:
         assert (
-            math.isclose(token.balanceOf(whale), startingWhale, abs_tol=10)
-            or token.balanceOf(whale) >= startingWhale
+            pytest.approx(token.balanceOf(whale), rel=RELATIVE_APPROX) == starting_whale
         )
     else:
-        assert token.balanceOf(whale) >= startingWhale
+        assert token.balanceOf(whale) >= starting_whale

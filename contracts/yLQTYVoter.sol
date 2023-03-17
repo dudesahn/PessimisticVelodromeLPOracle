@@ -68,6 +68,7 @@ contract yLQTYVoter is Ownable {
         // do our approvals
         lqty.approve(address(lqtyStaking), type(uint256).max);
         strategy = _strategy;
+        unstakeQueued = type(uint256).max;
     }
 
     /* ========== MODIFIERS ========== */
@@ -118,7 +119,7 @@ contract yLQTYVoter is Ownable {
         }
 
         if (wethBalance > 0) {
-            weth.safeTransfer(_strategy, lusdBalance);
+            weth.safeTransfer(_strategy, wethBalance);
         }
     }
 

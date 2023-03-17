@@ -1,13 +1,10 @@
-import math
+import pytest
 from utils import harvest_strategy
-from brownie import accounts, interface
+from brownie import accounts, interface, chain
 
-# go back and check the intent for all previous tests, make sure those are still covered
-# make sure all steps still make sense, or if we can replace it with something better (like whether we want to know for sure we made money in a step or not), potentially
-# depending on other fixtures and whether they are true or false
-# add tests for liquity voter as well
-# odds and ends test on desktop, also check curve and convex one too
-# make sure to check default brownie mix tests too, then perhaps make this the new base for brownie strategy mix
+# perhaps make this the new base for brownie strategy mix
+
+# last thing to do now is make sure all of my comments make sense and the calls within the tests do as well
 
 # test migrating a strategy
 def test_migration(
@@ -16,7 +13,6 @@ def test_migration(
     vault,
     whale,
     strategy,
-    chain,
     amount,
     sleep_time,
     contract_name,
@@ -26,6 +22,8 @@ def test_migration(
     trade_factory,
     use_yswaps,
     lusd_whale,
+    is_slippery,
+    no_profit,
 ):
 
     ## deposit to the vault after approving
@@ -41,6 +39,7 @@ def test_migration(
         destination_strategy,
     )
 
+    # record our current strategy's assets
     total_old = strategy.estimatedTotalAssets()
 
     # sleep to collect earnings
@@ -86,13 +85,14 @@ def test_migration(
     )
     new_strat_balance = new_strategy.estimatedTotalAssets()
 
-    # confirm we made money, or at least that we have about the same
-    assert new_strat_balance >= total_old or math.isclose(
-        new_strat_balance, total_old, abs_tol=5
-    )
+    # confirm that we have the same amount of assets in our new strategy as old
+    if no_profit and is_slippery:
+        assert pytest.approx(new_strat_balance, rel=RELATIVE_APPROX) == total_old
+    else:
+        assert new_strat_balance >= total_old
 
-    startingVault = vault.totalAssets()
-    print("\nVault starting assets with new strategy: ", startingVault)
+    # record our new assets
+    vault_new_assets = vault.totalAssets()
 
     # simulate earnings
     chain.sleep(sleep_time)
@@ -108,12 +108,15 @@ def test_migration(
         profit_amount,
         destination_strategy,
     )
-    vaultAssets_2 = vault.totalAssets()
+
+    vault_newer_assets = vault.totalAssets()
     # confirm we made money, or at least that we have about the same
-    assert vaultAssets_2 >= startingVault or math.isclose(
-        vaultAssets_2, startingVault, abs_tol=5
-    )
-    print("\nAssets after 1 day harvest: ", vaultAssets_2)
+    if is_slippery and no_profit:
+        assert (
+            pytest.approx(vault_newer_assets, rel=RELATIVE_APPROX) == vault_new_assets
+        )
+    else:
+        assert vault_newer_assets >= vault_new_assets
 
 
 # make sure we can still migrate when we don't have funds
@@ -123,7 +126,6 @@ def test_empty_migration(
     vault,
     whale,
     strategy,
-    chain,
     amount,
     sleep_time,
     contract_name,
@@ -147,6 +149,7 @@ def test_empty_migration(
         destination_strategy,
     )
 
+    # record our current strategy's assets
     total_old = strategy.estimatedTotalAssets()
 
     # sleep to collect earnings
@@ -179,6 +182,7 @@ def test_empty_migration(
             destination_strategy,
         )
 
+    # confirm we emptied the strategy
     assert strategy.estimatedTotalAssets() == 0
 
     # make sure we transferred strat params over
@@ -187,6 +191,9 @@ def test_empty_migration(
 
     # migrate our old strategy
     vault.migrateStrategy(strategy, new_strategy, {"from": gov})
+
+    # new strategy should also be empty
+    assert new_strategy.estimatedTotalAssets() == 0
 
     # make sure we took our gains and losses with us
     assert total_debt == vault.strategies(new_strategy)["totalDebt"]

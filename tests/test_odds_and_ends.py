@@ -1,8 +1,9 @@
 import brownie
-from brownie import Contract, config, interface
-import math
+from brownie import Contract, chain
+import pytest
 from utils import harvest_strategy
 
+# this module includes other tests we may need to generate, for instance to get best possible coverage on prepareReturn or liquidatePosition
 # do any extra testing here to hit all parts of liquidatePosition
 # generally this involves sending away all assets and then withdrawing before another harvest
 def test_odds_and_ends_liquidatePosition(
@@ -11,19 +12,14 @@ def test_odds_and_ends_liquidatePosition(
     vault,
     whale,
     strategy,
-    chain,
     amount,
-    is_slippery,
-    no_profit,
-    sleep_time,
     profit_whale,
     profit_amount,
     destination_strategy,
     use_yswaps,
-    old_vault,
 ):
     ## deposit to the vault after approving
-    startingWhale = token.balanceOf(whale)
+    starting_whale = token.balanceOf(whale)
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss) = harvest_strategy(
@@ -36,7 +32,7 @@ def test_odds_and_ends_liquidatePosition(
         destination_strategy,
     )
 
-    # send all funds away, need to update this based on strategy
+    ################# SEND ALL FUNDS AWAY. ADJUST AS NEEDED PER STRATEGY. #################
     staking = Contract(strategy.lqtyStaking())
     staking.unstake(staking.stakes(strategy), {"from": strategy})
     token.transfer(gov, token.balanceOf(strategy), {"from": strategy})
@@ -55,7 +51,6 @@ def test_odds_and_ends_locked_funds(
     vault,
     whale,
     strategy,
-    chain,
     amount,
     is_slippery,
     no_profit,
@@ -76,11 +71,7 @@ def test_odds_and_ends_rekt(
     vault,
     whale,
     strategy,
-    chain,
     amount,
-    is_slippery,
-    no_profit,
-    sleep_time,
     profit_whale,
     profit_amount,
     destination_strategy,
@@ -88,7 +79,7 @@ def test_odds_and_ends_rekt(
     old_vault,
 ):
     ## deposit to the vault after approving
-    startingWhale = token.balanceOf(whale)
+    starting_whale = token.balanceOf(whale)
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss) = harvest_strategy(
@@ -101,7 +92,7 @@ def test_odds_and_ends_rekt(
         destination_strategy,
     )
 
-    # send all funds away, need to update this based on strategy
+    ################# SEND ALL FUNDS AWAY. ADJUST AS NEEDED PER STRATEGY. #################
     staking = Contract(strategy.lqtyStaking())
     staking.unstake(staking.stakes(strategy), {"from": strategy})
     token.transfer(gov, token.balanceOf(strategy), {"from": strategy})
@@ -139,9 +130,9 @@ def test_odds_and_ends_rekt(
 
     print(
         "Raw loss:",
-        (startingWhale - token.balanceOf(whale)) / 1e18,
+        (starting_whale - token.balanceOf(whale)) / 1e18,
         "Percentage:",
-        (startingWhale - token.balanceOf(whale)) / startingWhale,
+        (starting_whale - token.balanceOf(whale)) / starting_whale,
     )
     print("Share price:", vault.pricePerShare() / 1e18)
 
@@ -152,16 +143,7 @@ def test_weird_reverts(
     vault,
     whale,
     strategy,
-    chain,
-    amount,
-    is_slippery,
-    no_profit,
-    sleep_time,
-    profit_whale,
-    profit_amount,
     destination_strategy,
-    use_yswaps,
-    old_vault,
 ):
 
     # only vault can call this
@@ -185,19 +167,14 @@ def test_odds_and_ends_empty_strat(
     vault,
     whale,
     strategy,
-    chain,
     amount,
-    is_slippery,
-    no_profit,
-    sleep_time,
     profit_whale,
     profit_amount,
     destination_strategy,
     use_yswaps,
-    old_vault,
 ):
     ## deposit to the vault after approving
-    startingWhale = token.balanceOf(whale)
+    starting_whale = token.balanceOf(whale)
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss) = harvest_strategy(
@@ -210,7 +187,7 @@ def test_odds_and_ends_empty_strat(
         destination_strategy,
     )
 
-    # send all funds away, need to update this based on strategy
+    ################# SEND ALL FUNDS AWAY. ADJUST AS NEEDED PER STRATEGY. #################
     staking = Contract(strategy.lqtyStaking())
     staking.unstake(staking.stakes(strategy), {"from": strategy})
     token.transfer(gov, token.balanceOf(strategy), {"from": strategy})
@@ -248,22 +225,18 @@ def test_odds_and_ends_empty_strat(
 
 
 # this test makes sure we can still harvest without any profit and not revert
+# for some strategies it may be impossible to harvest without generating profit, especially if not using yswaps
 def test_odds_and_ends_no_profit(
     gov,
     token,
     vault,
     whale,
     strategy,
-    chain,
     amount,
-    is_slippery,
-    no_profit,
-    sleep_time,
     profit_whale,
     profit_amount,
     destination_strategy,
     use_yswaps,
-    old_vault,
 ):
     ## deposit to the vault after approving
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
@@ -278,7 +251,7 @@ def test_odds_and_ends_no_profit(
         destination_strategy,
     )
 
-    # if we don't want profit, don't use yswaps
+    # if we don't want profit, don't use yswaps (False for first argument)
     (profit, loss) = harvest_strategy(
         False,
         strategy,

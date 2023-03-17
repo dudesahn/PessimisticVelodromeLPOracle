@@ -1,6 +1,5 @@
-import brownie
-from brownie import chain, Contract, ZERO_ADDRESS
-import math
+from brownie import chain, ZERO_ADDRESS
+import pytest
 from utils import harvest_strategy
 
 # these tests all assess whether a strategy will hit accounting errors following donations to the strategy.
@@ -20,6 +19,7 @@ def test_withdraw_after_donation_1(
     profit_amount,
     destination_strategy,
     use_yswaps,
+    RELATIVE_APPROX,
 ):
 
     ## deposit to the vault after approving
@@ -34,14 +34,14 @@ def test_withdraw_after_donation_1(
         profit_amount,
         destination_strategy,
     )
+    prev_params = vault.strategies(strategy)
 
     # reduce our debtRatio to 50%
-    prev_params = vault.strategies(strategy)
     currentDebt = vault.strategies(strategy)["debtRatio"]
     vault.updateStrategyDebtRatio(strategy, currentDebt / 2, {"from": gov})
     assert vault.strategies(strategy)["debtRatio"] == currentDebt / 2
 
-    # our profit whale donates to the vault, what a nice person!
+    # our profit whale donates to the vault, what a nice person! 🐳
     donation = amount / 2
     token.transfer(strategy, donation, {"from": profit_whale})
 
@@ -51,7 +51,6 @@ def test_withdraw_after_donation_1(
 
     # simulate some earnings
     chain.sleep(sleep_time)
-    chain.mine(1)
 
     # after our donation, best to use health check in case our donation profit is too big
     strategy.setDoHealthCheck(False, {"from": gov})
@@ -64,45 +63,59 @@ def test_withdraw_after_donation_1(
         profit_amount,
         destination_strategy,
     )
+
+    # harvest again so the strategy reports the profit
+    if use_yswaps:
+        print("Using ySwaps for harvests")
+        (profit, loss) = harvest_strategy(
+            use_yswaps,
+            strategy,
+            token,
+            gov,
+            profit_whale,
+            profit_amount,
+            destination_strategy,
+        )
+
+    # record our new strategy params
     new_params = vault.strategies(strategy)
 
     # sleep 5 days to allow share price to normalize
     chain.sleep(86400 * 5)
     chain.mine(1)
 
+    # specifically check that our profit is greater than our donation or at least close if we get slippage on deposit/withdrawal and have no profit
     profit = new_params["totalGain"] - prev_params["totalGain"]
-
-    # specifically check that our gain is greater than our donation or at least no more than 10 wei if we get slippage on deposit/withdrawal
-    # yswaps also will not have seen profit from the first donation after only one harvest
-    if is_slippery and no_profit or use_yswaps:
-        assert math.isclose(profit, donation, abs_tol=10) or profit >= donation
+    if is_slippery and no_profit:
+        assert pytest.approx(profit, rel=RELATIVE_APPROX) == donation
     else:
         assert profit > donation
         assert profit > 0
 
-    # check that we didn't add any more loss, or at least no more than 10 wei if we get slippage on deposit/withdrawal
+    # check that we didn't add any more loss, or close if we get slippage on deposit/withdrawal
     if is_slippery:
-        assert math.isclose(
-            new_params["totalLoss"], prev_params["totalLoss"], abs_tol=10
+        assert (
+            pytest.approx(new_params["totalLoss"], rel=RELATIVE_APPROX)
+            == prev_params["totalLoss"]
         )
     else:
         assert new_params["totalLoss"] == prev_params["totalLoss"]
 
-    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available (within 10 wei)
+    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available
     # we multiply this by the debtRatio of our strategy out of 10_000 total
-    # a vault only knows it has assets if the strategy has reported. yswaps has extra profit donated to the strategy as well.
+    # a vault only knows it has assets if the strategy has reported, and yswaps adds extra unrealized profit to the strategy since debtRatio > 0
     if use_yswaps:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
+        assert (
+            pytest.approx(
+                vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
+                rel=RELATIVE_APPROX,
+            )
+            == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
         )
     else:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
-        )
+        assert pytest.approx(
+            vault.totalAssets() * new_params["debtRatio"] / 10_000, rel=RELATIVE_APPROX
+        ) == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
 
 
 # lower debtRatio to 0, donate, withdraw less than the donation, then harvest
@@ -121,6 +134,7 @@ def test_withdraw_after_donation_2(
     profit_amount,
     destination_strategy,
     use_yswaps,
+    RELATIVE_APPROX,
 ):
 
     ## deposit to the vault after approving
@@ -142,7 +156,7 @@ def test_withdraw_after_donation_2(
     vault.updateStrategyDebtRatio(strategy, 0, {"from": gov})
     assert vault.strategies(strategy)["debtRatio"] == 0
 
-    # our profit whale donates to the vault, what a nice person!
+    # our profit whale donates to the vault, what a nice person! 🐳
     donation = amount / 2
     token.transfer(strategy, donation, {"from": profit_whale})
 
@@ -152,7 +166,6 @@ def test_withdraw_after_donation_2(
 
     # simulate some earnings
     chain.sleep(sleep_time)
-    chain.mine(1)
 
     # after our donation, best to use health check in case our donation profit is too big
     strategy.setDoHealthCheck(False, {"from": gov})
@@ -165,45 +178,49 @@ def test_withdraw_after_donation_2(
         profit_amount,
         destination_strategy,
     )
+
+    # harvest again so the strategy reports the profit
+    if use_yswaps:
+        print("Using ySwaps for harvests")
+        (profit, loss) = harvest_strategy(
+            use_yswaps,
+            strategy,
+            token,
+            gov,
+            profit_whale,
+            profit_amount,
+            destination_strategy,
+        )
     new_params = vault.strategies(strategy)
 
     # sleep 5 days to allow share price to normalize
     chain.sleep(86400 * 5)
     chain.mine(1)
 
+    # specifically check that our profit is greater than our donation or at least close if we get slippage on deposit/withdrawal and have no profit
     profit = new_params["totalGain"] - prev_params["totalGain"]
-
-    # specifically check that our gain is greater than our donation or at least no more than 10 wei if we get slippage on deposit/withdrawal
-    # yswaps also will not have seen profit from the first donation after only one harvest
-    if is_slippery and no_profit or use_yswaps:
-        assert math.isclose(profit, donation, abs_tol=10) or profit >= donation
+    if is_slippery and no_profit:
+        assert pytest.approx(profit, rel=RELATIVE_APPROX) == donation
     else:
         assert profit > donation
         assert profit > 0
 
-    # check that we didn't add any more loss, or at least no more than 10 wei if we get slippage on deposit/withdrawal
+    # check that we didn't add any more loss, or close if we get slippage on deposit/withdrawal
     if is_slippery:
-        assert math.isclose(
-            new_params["totalLoss"], prev_params["totalLoss"], abs_tol=10
+        assert (
+            pytest.approx(new_params["totalLoss"], rel=RELATIVE_APPROX)
+            == prev_params["totalLoss"]
         )
     else:
         assert new_params["totalLoss"] == prev_params["totalLoss"]
 
-    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available (within 10 wei)
+    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available
     # we multiply this by the debtRatio of our strategy out of 10_000 total
-    # a vault only knows it has assets if the strategy has reported. yswaps has extra profit donated to the strategy as well.
-    if use_yswaps:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
-        )
-    else:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
-        )
+    # a vault only knows it has assets if the strategy has reported. also, if strategy assets are zero, we don't get additional yswaps profit.
+    # so in this case, no difference expected between yswaps and non-yswaps strategies.
+    assert pytest.approx(
+        vault.totalAssets() * new_params["debtRatio"] / 10_000, rel=RELATIVE_APPROX
+    ) == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
 
 
 # lower debtRatio to 0, donate, withdraw more than the donation, then harvest
@@ -222,6 +239,7 @@ def test_withdraw_after_donation_3(
     profit_amount,
     destination_strategy,
     use_yswaps,
+    RELATIVE_APPROX,
     vault_address,
 ):
 
@@ -244,7 +262,7 @@ def test_withdraw_after_donation_3(
     vault.updateStrategyDebtRatio(strategy, 0, {"from": gov})
     assert vault.strategies(strategy)["debtRatio"] == 0
 
-    # our profit whale donates to the vault, what a nice person!
+    # our profit whale donates to the vault, what a nice person! 🐳
     donation = amount / 2
     token.transfer(strategy, donation, {"from": profit_whale})
 
@@ -260,7 +278,6 @@ def test_withdraw_after_donation_3(
 
     # simulate some earnings
     chain.sleep(sleep_time)
-    chain.mine(1)
 
     # after our donation, best to use health check in case we have a big profit
     strategy.setDoHealthCheck(False, {"from": gov})
@@ -273,45 +290,49 @@ def test_withdraw_after_donation_3(
         profit_amount,
         destination_strategy,
     )
+
+    # harvest again so the strategy reports the profit
+    if use_yswaps:
+        print("Using ySwaps for harvests")
+        (profit, loss) = harvest_strategy(
+            use_yswaps,
+            strategy,
+            token,
+            gov,
+            profit_whale,
+            profit_amount,
+            destination_strategy,
+        )
     new_params = vault.strategies(strategy)
 
     # sleep 5 days to allow share price to normalize
     chain.sleep(86400 * 5)
     chain.mine(1)
 
+    # specifically check that our profit is greater than our donation or at least close if we get slippage on deposit/withdrawal and have no profit
     profit = new_params["totalGain"] - prev_params["totalGain"]
-
-    # specifically check that our gain is greater than our donation or at least no more than 10 wei if we get slippage on deposit/withdrawal
-    # yswaps also will not have seen profit from the first donation after only one harvest
-    if is_slippery and no_profit or use_yswaps:
-        assert math.isclose(profit, donation, abs_tol=10) or profit >= donation
+    if is_slippery and no_profit:
+        assert pytest.approx(profit, rel=RELATIVE_APPROX) == donation
     else:
         assert profit > donation
         assert profit > 0
 
-    # check that we didn't add any more loss, or at least no more than 10 wei if we get slippage on deposit/withdrawal
+    # check that we didn't add any more loss, or close if we get slippage on deposit/withdrawal
     if is_slippery:
-        assert math.isclose(
-            new_params["totalLoss"], prev_params["totalLoss"], abs_tol=10
+        assert (
+            pytest.approx(new_params["totalLoss"], rel=RELATIVE_APPROX)
+            == prev_params["totalLoss"]
         )
     else:
         assert new_params["totalLoss"] == prev_params["totalLoss"]
 
-    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available (within 10 wei)
+    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available
     # we multiply this by the debtRatio of our strategy out of 10_000 total
-    # a vault only knows it has assets if the strategy has reported. yswaps has extra profit donated to the strategy as well.
-    if use_yswaps:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
-        )
-    else:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
-        )
+    # a vault only knows it has assets if the strategy has reported. also, if strategy assets are zero, we don't get additional yswaps profit.
+    # so in this case, no difference expected between yswaps and non-yswaps strategies.
+    assert pytest.approx(
+        vault.totalAssets() * new_params["debtRatio"] / 10_000, rel=RELATIVE_APPROX
+    ) == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
 
 
 # lower debtRatio to 50%, donate, withdraw more than the donation, then harvest
@@ -330,6 +351,7 @@ def test_withdraw_after_donation_4(
     profit_amount,
     destination_strategy,
     use_yswaps,
+    RELATIVE_APPROX,
     vault_address,
 ):
 
@@ -352,7 +374,7 @@ def test_withdraw_after_donation_4(
     vault.updateStrategyDebtRatio(strategy, currentDebt / 2, {"from": gov})
     assert vault.strategies(strategy)["debtRatio"] == currentDebt / 2
 
-    # our profit whale donates to the vault, what a nice person!
+    # our profit whale donates to the vault, what a nice person! 🐳
     donation = amount / 2
     token.transfer(strategy, donation, {"from": profit_whale})
 
@@ -368,7 +390,6 @@ def test_withdraw_after_donation_4(
 
     # simulate some earnings
     chain.sleep(sleep_time)
-    chain.mine(1)
 
     # after our donation, best to use health check in case we have a big profit
     strategy.setDoHealthCheck(False, {"from": gov})
@@ -381,45 +402,57 @@ def test_withdraw_after_donation_4(
         profit_amount,
         destination_strategy,
     )
+
+    # harvest again so the strategy reports the profit
+    if use_yswaps:
+        print("Using ySwaps for harvests")
+        (profit, loss) = harvest_strategy(
+            use_yswaps,
+            strategy,
+            token,
+            gov,
+            profit_whale,
+            profit_amount,
+            destination_strategy,
+        )
     new_params = vault.strategies(strategy)
 
     # sleep 5 days to allow share price to normalize
     chain.sleep(86400 * 5)
     chain.mine(1)
 
+    # specifically check that our profit is greater than our donation or at least close if we get slippage on deposit/withdrawal and have no profit
     profit = new_params["totalGain"] - prev_params["totalGain"]
-
-    # specifically check that our gain is greater than our donation or at least no more than 10 wei if we get slippage on deposit/withdrawal
-    # yswaps also will not have seen profit from the first donation after only one harvest
-    if is_slippery and no_profit or use_yswaps:
-        assert math.isclose(profit, donation, abs_tol=10) or profit >= donation
+    if is_slippery and no_profit:
+        assert pytest.approx(profit, rel=RELATIVE_APPROX) == donation
     else:
         assert profit > donation
         assert profit > 0
 
-    # check that we didn't add any more loss, or at least no more than 10 wei if we get slippage on deposit/withdrawal
+    # check that we didn't add any more loss, or close if we get slippage on deposit/withdrawal
     if is_slippery:
-        assert math.isclose(
-            new_params["totalLoss"], prev_params["totalLoss"], abs_tol=10
+        assert (
+            pytest.approx(new_params["totalLoss"], rel=RELATIVE_APPROX)
+            == prev_params["totalLoss"]
         )
     else:
         assert new_params["totalLoss"] == prev_params["totalLoss"]
 
-    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available (within 10 wei)
+    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available
     # we multiply this by the debtRatio of our strategy out of 10_000 total
-    # a vault only knows it has assets if the strategy has reported. yswaps has extra profit donated to the strategy as well.
+    # a vault only knows it has assets if the strategy has reported, and yswaps adds extra unrealized profit to the strategy since debtRatio > 0
     if use_yswaps:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
+        assert (
+            pytest.approx(
+                vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
+                rel=RELATIVE_APPROX,
+            )
+            == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
         )
     else:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
-        )
+        assert pytest.approx(
+            vault.totalAssets() * new_params["debtRatio"] / 10_000, rel=RELATIVE_APPROX
+        ) == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
 
 
 # donate, withdraw more than the donation, then harvest
@@ -438,6 +471,7 @@ def test_withdraw_after_donation_5(
     profit_amount,
     destination_strategy,
     use_yswaps,
+    RELATIVE_APPROX,
     vault_address,
 ):
 
@@ -455,7 +489,7 @@ def test_withdraw_after_donation_5(
     )
     prev_params = vault.strategies(strategy)
 
-    # our profit whale donates to the vault, what a nice person!
+    # our profit whale donates to the vault, what a nice person! 🐳
     donation = amount / 2
     token.transfer(strategy, donation, {"from": profit_whale})
 
@@ -471,7 +505,6 @@ def test_withdraw_after_donation_5(
 
     # simulate some earnings
     chain.sleep(sleep_time)
-    chain.mine(1)
 
     # after our donation, best to use health check in case we have a big profit
     strategy.setDoHealthCheck(False, {"from": gov})
@@ -484,45 +517,57 @@ def test_withdraw_after_donation_5(
         profit_amount,
         destination_strategy,
     )
+
+    # harvest again so the strategy reports the profit
+    if use_yswaps:
+        print("Using ySwaps for harvests")
+        (profit, loss) = harvest_strategy(
+            use_yswaps,
+            strategy,
+            token,
+            gov,
+            profit_whale,
+            profit_amount,
+            destination_strategy,
+        )
     new_params = vault.strategies(strategy)
 
     # sleep 5 days to allow share price to normalize
     chain.sleep(86400 * 5)
     chain.mine(1)
 
+    # specifically check that our profit is greater than our donation or at least close if we get slippage on deposit/withdrawal and have no profit
     profit = new_params["totalGain"] - prev_params["totalGain"]
-
-    # specifically check that our gain is greater than our donation or at least no more than 10 wei if we get slippage on deposit/withdrawal
-    # yswaps also will not have seen profit from the first donation after only one harvest
-    if is_slippery and no_profit or use_yswaps:
-        assert math.isclose(profit, donation, abs_tol=10) or profit >= donation
+    if is_slippery and no_profit:
+        assert pytest.approx(profit, rel=RELATIVE_APPROX) == donation
     else:
         assert profit > donation
         assert profit > 0
 
-    # check that we didn't add any more loss, or at least no more than 10 wei if we get slippage on deposit/withdrawal
+    # check that we didn't add any more loss, or close if we get slippage on deposit/withdrawal
     if is_slippery:
-        assert math.isclose(
-            new_params["totalLoss"], prev_params["totalLoss"], abs_tol=10
+        assert (
+            pytest.approx(new_params["totalLoss"], rel=RELATIVE_APPROX)
+            == prev_params["totalLoss"]
         )
     else:
         assert new_params["totalLoss"] == prev_params["totalLoss"]
 
-    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available (within 10 wei)
+    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available
     # we multiply this by the debtRatio of our strategy out of 10_000 total
-    # a vault only knows it has assets if the strategy has reported. yswaps has extra profit donated to the strategy as well.
+    # a vault only knows it has assets if the strategy has reported, and yswaps adds extra unrealized profit to the strategy since debtRatio > 0
     if use_yswaps:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
+        assert (
+            pytest.approx(
+                vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
+                rel=RELATIVE_APPROX,
+            )
+            == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
         )
     else:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
-        )
+        assert pytest.approx(
+            vault.totalAssets() * new_params["debtRatio"] / 10_000, rel=RELATIVE_APPROX
+        ) == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
 
 
 # donate, withdraw less than the donation, then harvest
@@ -541,6 +586,7 @@ def test_withdraw_after_donation_6(
     profit_amount,
     destination_strategy,
     use_yswaps,
+    RELATIVE_APPROX,
     vault_address,
 ):
 
@@ -559,7 +605,7 @@ def test_withdraw_after_donation_6(
 
     prev_params = vault.strategies(strategy)
 
-    # our profit whale donates to the vault, what a nice person!
+    # our profit whale donates to the vault, what a nice person! 🐳
     donation = amount / 2
     token.transfer(strategy, donation, {"from": profit_whale})
 
@@ -569,7 +615,6 @@ def test_withdraw_after_donation_6(
 
     # simulate some earnings
     chain.sleep(sleep_time)
-    chain.mine(1)
 
     # after our donation, best to use health check in case our donation profit is too big
     strategy.setDoHealthCheck(False, {"from": gov})
@@ -582,45 +627,57 @@ def test_withdraw_after_donation_6(
         profit_amount,
         destination_strategy,
     )
+
+    # harvest again so the strategy reports the profit
+    if use_yswaps:
+        print("Using ySwaps for harvests")
+        (profit, loss) = harvest_strategy(
+            use_yswaps,
+            strategy,
+            token,
+            gov,
+            profit_whale,
+            profit_amount,
+            destination_strategy,
+        )
     new_params = vault.strategies(strategy)
 
     # sleep 5 days to allow share price to normalize
     chain.sleep(86400 * 5)
     chain.mine(1)
 
+    # specifically check that our profit is greater than our donation or at least close if we get slippage on deposit/withdrawal and have no profit
     profit = new_params["totalGain"] - prev_params["totalGain"]
-
-    # specifically check that our gain is greater than our donation or at least no more than 10 wei if we get slippage on deposit/withdrawal
-    # yswaps also will not have seen profit from the first donation after only one harvest
-    if is_slippery and no_profit or use_yswaps:
-        assert math.isclose(profit, donation, abs_tol=10) or profit >= donation
+    if is_slippery and no_profit:
+        assert pytest.approx(profit, rel=RELATIVE_APPROX) == donation
     else:
         assert profit > donation
         assert profit > 0
 
-    # check that we didn't add any more loss, or at least no more than 10 wei if we get slippage on deposit/withdrawal
+    # check that we didn't add any more loss, or close if we get slippage on deposit/withdrawal
     if is_slippery:
-        assert math.isclose(
-            new_params["totalLoss"], prev_params["totalLoss"], abs_tol=10
+        assert (
+            pytest.approx(new_params["totalLoss"], rel=RELATIVE_APPROX)
+            == prev_params["totalLoss"]
         )
     else:
         assert new_params["totalLoss"] == prev_params["totalLoss"]
 
-    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available (within 10 wei)
+    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available
     # we multiply this by the debtRatio of our strategy out of 10_000 total
-    # a vault only knows it has assets if the strategy has reported. yswaps has extra profit donated to the strategy as well.
+    # a vault only knows it has assets if the strategy has reported, and yswaps adds extra unrealized profit to the strategy since debtRatio > 0
     if use_yswaps:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
+        assert (
+            pytest.approx(
+                vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
+                rel=RELATIVE_APPROX,
+            )
+            == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
         )
     else:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
-        )
+        assert pytest.approx(
+            vault.totalAssets() * new_params["debtRatio"] / 10_000, rel=RELATIVE_APPROX
+        ) == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
 
 
 # lower debtRatio to 0, donate, withdraw more than the donation, then harvest
@@ -641,6 +698,7 @@ def test_withdraw_after_donation_7(
     destination_strategy,
     vault_address,
     use_yswaps,
+    RELATIVE_APPROX,
 ):
 
     ## deposit to the vault after approving
@@ -663,7 +721,7 @@ def test_withdraw_after_donation_7(
     vault.updateStrategyDebtRatio(strategy, 0, {"from": gov})
     assert vault.strategies(strategy)["debtRatio"] == 0
 
-    # our profit whale donates to the vault, what a nice person!
+    # our profit whale donates to the vault, what a nice person! 🐳
     donation = amount / 2
     token.transfer(strategy, donation, {"from": profit_whale})
 
@@ -679,7 +737,6 @@ def test_withdraw_after_donation_7(
 
     # simulate some earnings
     chain.sleep(sleep_time)
-    chain.mine(1)
 
     # after our donation, best to use health check in case we have a big profit
     strategy.setDoHealthCheck(False, {"from": gov})
@@ -692,48 +749,10 @@ def test_withdraw_after_donation_7(
         profit_amount,
         destination_strategy,
     )
-    new_params = vault.strategies(strategy)
 
-    # sleep 5 days to allow share price to normalize
-    chain.sleep(86400 * 5)
-    chain.mine(1)
-
-    profit = new_params["totalGain"] - prev_params["totalGain"]
-
-    # specifically check that our gain is greater than our donation or at least no more than 10 wei if we get slippage on deposit/withdrawal
-    # yswaps also will not have seen profit from the first donation after only one harvest
-    if is_slippery and no_profit or use_yswaps:
-        assert math.isclose(profit, donation, abs_tol=10) or profit >= donation
-    else:
-        assert profit > donation
-        assert profit > 0
-
-    # check that we didn't add any more loss, or at least no more than 10 wei if we get slippage on deposit/withdrawal
-    if is_slippery:
-        assert math.isclose(
-            new_params["totalLoss"], prev_params["totalLoss"], abs_tol=10
-        )
-    else:
-        assert new_params["totalLoss"] == prev_params["totalLoss"]
-
-    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available (within 10 wei)
-    # we multiply this by the debtRatio of our strategy out of 10_000 total
-    # a vault only knows it has assets if the strategy has reported. yswaps has extra profit donated to the strategy as well.
+    # harvest again so the strategy reports the profit
     if use_yswaps:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
-        )
-    else:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
-        )
-
-    # we need to harvest twice for yswaps to get the final profit out
-    if use_yswaps:
+        print("Using ySwaps for harvests")
         (profit, loss) = harvest_strategy(
             use_yswaps,
             strategy,
@@ -743,6 +762,35 @@ def test_withdraw_after_donation_7(
             profit_amount,
             destination_strategy,
         )
+    new_params = vault.strategies(strategy)
+
+    # sleep 5 days to allow share price to normalize
+    chain.sleep(86400 * 5)
+    chain.mine(1)
+
+    # specifically check that our profit is greater than our donation or at least close if we get slippage on deposit/withdrawal and have no profit
+    profit = new_params["totalGain"] - prev_params["totalGain"]
+    if is_slippery and no_profit:
+        assert pytest.approx(profit, rel=RELATIVE_APPROX) == donation
+    else:
+        assert profit > donation
+        assert profit > 0
+
+    # check that we didn't add any more loss, or close if we get slippage on deposit/withdrawal
+    if is_slippery:
+        assert (
+            pytest.approx(new_params["totalLoss"], rel=RELATIVE_APPROX)
+            == prev_params["totalLoss"]
+        )
+    else:
+        assert new_params["totalLoss"] == prev_params["totalLoss"]
+
+    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available
+    # we multiply this by the debtRatio of our strategy out of 10_000 total
+    # a vault only knows it has assets if the strategy has reported.
+    assert pytest.approx(
+        vault.totalAssets() * new_params["debtRatio"] / 10_000, rel=RELATIVE_APPROX
+    ) == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
 
     # check everywhere to make sure we emptied out the strategy
     if is_slippery:
@@ -752,13 +800,11 @@ def test_withdraw_after_donation_7(
     assert token.balanceOf(strategy) == 0
     current_assets = vault.totalAssets()
 
-    # assert that our total assets have gone up or stayed the same when accounting for the donation and withdrawal, or that we're close if we have no yield and a funky token
+    # assert that our total assets have gone up or stayed the same when accounting for the donation and withdrawal, or that we're close at least
     if is_slippery and no_profit:
         assert (
-            math.isclose(
-                donation - to_withdraw + prev_assets, current_assets, abs_tol=10
-            )
-            or current_assets >= donation - to_withdraw + prev_assets
+            pytest.approx(donation - to_withdraw + prev_assets, rel=RELATIVE_APPROX)
+            == current_assets
         )
     else:
         assert current_assets >= donation - to_withdraw + prev_assets
@@ -788,6 +834,7 @@ def test_withdraw_after_donation_8(
     destination_strategy,
     vault_address,
     use_yswaps,
+    RELATIVE_APPROX,
 ):
 
     ## deposit to the vault after approving
@@ -810,7 +857,7 @@ def test_withdraw_after_donation_8(
     vault.updateStrategyDebtRatio(strategy, 0, {"from": gov})
     assert vault.strategies(strategy)["debtRatio"] == 0
 
-    # our profit whale donates to the vault, what a nice person!
+    # our profit whale donates to the vault, what a nice person! 🐳
     donation = amount / 2
     token.transfer(strategy, donation, {"from": profit_whale})
 
@@ -820,7 +867,6 @@ def test_withdraw_after_donation_8(
 
     # simulate some earnings
     chain.sleep(sleep_time)
-    chain.mine(1)
 
     # after our donation, best to use health check in case our donation profit is too big
     strategy.setDoHealthCheck(False, {"from": gov})
@@ -833,48 +879,10 @@ def test_withdraw_after_donation_8(
         profit_amount,
         destination_strategy,
     )
-    new_params = vault.strategies(strategy)
 
-    # sleep 5 days to allow share price to normalize
-    chain.sleep(86400 * 5)
-    chain.mine(1)
-
-    profit = new_params["totalGain"] - prev_params["totalGain"]
-
-    # specifically check that our gain is greater than our donation or at least no more than 10 wei if we get slippage on deposit/withdrawal
-    # yswaps also will not have seen profit from the first donation after only one harvest
-    if is_slippery and no_profit or use_yswaps:
-        assert math.isclose(profit, donation, abs_tol=10) or profit >= donation
-    else:
-        assert profit > donation
-        assert profit > 0
-
-    # check that we didn't add any more loss, or at least no more than 10 wei if we get slippage on deposit/withdrawal
-    if is_slippery:
-        assert math.isclose(
-            new_params["totalLoss"], prev_params["totalLoss"], abs_tol=10
-        )
-    else:
-        assert new_params["totalLoss"] == prev_params["totalLoss"]
-
-    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available (within 10 wei)
-    # we multiply this by the debtRatio of our strategy out of 10_000 total
-    # a vault only knows it has assets if the strategy has reported. yswaps has extra profit donated to the strategy as well.
+    # harvest again so the strategy reports the profit
     if use_yswaps:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
-        )
-    else:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
-        )
-
-    # we need to harvest twice for yswaps to get the final profit out
-    if use_yswaps:
+        print("Using ySwaps for harvests")
         (profit, loss) = harvest_strategy(
             use_yswaps,
             strategy,
@@ -884,6 +892,36 @@ def test_withdraw_after_donation_8(
             profit_amount,
             destination_strategy,
         )
+    new_params = vault.strategies(strategy)
+
+    # sleep 5 days to allow share price to normalize
+    chain.sleep(86400 * 5)
+    chain.mine(1)
+
+    # specifically check that our profit is greater than our donation or at least close if we get slippage on deposit/withdrawal and have no profit
+    profit = new_params["totalGain"] - prev_params["totalGain"]
+    if is_slippery and no_profit:
+        assert pytest.approx(profit, rel=RELATIVE_APPROX) == donation
+    else:
+        assert profit > donation
+        assert profit > 0
+
+    # check that we didn't add any more loss, or close if we get slippage on deposit/withdrawal
+    if is_slippery:
+        assert (
+            pytest.approx(new_params["totalLoss"], rel=RELATIVE_APPROX)
+            == prev_params["totalLoss"]
+        )
+    else:
+        assert new_params["totalLoss"] == prev_params["totalLoss"]
+
+    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available
+    # we multiply this by the debtRatio of our strategy out of 10_000 total
+    # a vault only knows it has assets if the strategy has reported. also, if strategy assets are zero, we don't get additional yswaps profit.
+    # so in this case, no difference expected between yswaps and non-yswaps strategies.
+    assert pytest.approx(
+        vault.totalAssets() * new_params["debtRatio"] / 10_000, rel=RELATIVE_APPROX
+    ) == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
 
     # check everywhere to make sure we emptied out the strategy
     if is_slippery:
@@ -893,13 +931,11 @@ def test_withdraw_after_donation_8(
     assert token.balanceOf(strategy) == 0
     current_assets = vault.totalAssets()
 
-    # assert that our total assets have gone up or stayed the same when accounting for the donation and withdrawal, or that we're close if we have no yield and a funky token
+    # assert that our total assets have gone up or stayed the same when accounting for the donation and withdrawal, or that we're close at least
     if is_slippery and no_profit:
         assert (
-            math.isclose(
-                donation - to_withdraw + prev_assets, current_assets, abs_tol=10
-            )
-            or current_assets >= donation - to_withdraw + prev_assets
+            pytest.approx(donation - to_withdraw + prev_assets, rel=RELATIVE_APPROX)
+            == current_assets
         )
     else:
         assert current_assets >= donation - to_withdraw + prev_assets

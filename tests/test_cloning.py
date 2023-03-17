@@ -1,5 +1,6 @@
 import brownie
-import math
+from brownie import chain
+import pytest
 from utils import harvest_strategy
 
 # make sure cloned strategy works just like normal
@@ -10,7 +11,6 @@ def test_cloning(
     strategist,
     whale,
     strategy,
-    chain,
     rewards,
     keeper,
     amount,
@@ -32,7 +32,7 @@ def test_cloning(
         return
 
     ## deposit to the vault after approving like normal
-    startingWhale = token.balanceOf(whale)
+    starting_whale = token.balanceOf(whale)
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss) = harvest_strategy(
@@ -112,7 +112,6 @@ def test_cloning(
     vault.addStrategy(
         new_strategy.address, 10_000, 0, 2 ** 256 - 1, 1_000, {"from": gov}
     )
-
     assert vault.withdrawalQueue(0) == new_strategy.address
     assert vault.strategies(new_strategy)["debtRatio"] == 10_000
     assert vault.strategies(strategy)["debtRatio"] == 0
@@ -131,13 +130,9 @@ def test_cloning(
     assert old_assets > 0
     assert token.balanceOf(new_strategy) == 0
     assert new_strategy.estimatedTotalAssets() > 0
-    print("\nStarting Assets: ", old_assets / 1e18)
-
-    # try and include custom logic here to check that funds are in the staking contract (if needed)
 
     # simulate some earnings
     chain.sleep(sleep_time)
-    chain.mine(1)
 
     # harvest after a day, store new asset amount
     (profit, loss) = harvest_strategy(
@@ -153,7 +148,6 @@ def test_cloning(
 
     # we can't use strategyEstimated Assets because the profits are sent to the vault
     assert new_assets >= old_assets
-    print("\nNew assets: ", new_assets / 1e18)
 
     # Display estimated APR based on the two days before the pay out
     print(
@@ -168,13 +162,14 @@ def test_cloning(
     chain.sleep(86400 * 5)
     chain.mine(1)
 
-    # withdraw and confirm we made money, or at least that we have about the same
+    # withdraw and confirm we made money, or at least that we have about the same (profit whale has to be different from normal whale)
     vault.withdraw({"from": whale})
     if is_slippery and no_profit:
         assert (
-            math.isclose(token.balanceOf(whale), startingWhale, abs_tol=10)
-            or token.balanceOf(whale) >= startingWhale
+            pytest.approx(token.balanceOf(whale), rel=RELATIVE_APPROX) == starting_whale
         )
     else:
-        assert token.balanceOf(whale) >= startingWhale
+        assert token.balanceOf(whale) >= starting_whale
+
+    # make sure our PPS went us as well
     assert vault.pricePerShare() >= before_pps

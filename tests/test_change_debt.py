@@ -1,17 +1,14 @@
-import math
 import pytest
-import brownie
 from utils import harvest_strategy
+from brownie import chain
 
-# test changing the debtRatio on a strategy and then harvesting it
+# test reducing the debtRatio on a strategy and then harvesting it
 def test_change_debt(
     gov,
     token,
     vault,
-    strategist,
     whale,
     strategy,
-    chain,
     amount,
     sleep_time,
     is_slippery,
@@ -20,9 +17,10 @@ def test_change_debt(
     profit_amount,
     destination_strategy,
     use_yswaps,
+    RELATIVE_APPROX,
 ):
     ## deposit to the vault after approving
-    startingWhale = token.balanceOf(whale)
+    starting_whale = token.balanceOf(whale)
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss) = harvest_strategy(
@@ -53,11 +51,14 @@ def test_change_debt(
         destination_strategy,
     )
 
-    assert strategy.estimatedTotalAssets() <= startingStrategy
+    # make sure we reduced our debt properly
+    assert (
+        pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX)
+        == startingStrategy / 2 + profit_amount
+    )
 
     # simulate earnings
     chain.sleep(sleep_time)
-    chain.mine(1)
 
     # set DebtRatio back to 100%
     vault.updateStrategyDebtRatio(strategy, currentDebt, {"from": gov})
@@ -75,7 +76,10 @@ def test_change_debt(
     new_assets = vault.totalAssets()
 
     # confirm we made money, or at least that we have about the same
-    assert new_assets >= old_assets or math.isclose(new_assets, old_assets, abs_tol=5)
+    if is_slippery and no_profit:
+        assert pytest.approx(new_assets, rel=RELATIVE_APPROX) == old_assets
+    else:
+        new_assets >= old_assets
 
     # simulate five days of waiting for share price to bump back up
     chain.sleep(86400 * 5)
@@ -85,11 +89,10 @@ def test_change_debt(
     vault.withdraw({"from": whale})
     if is_slippery and no_profit:
         assert (
-            math.isclose(token.balanceOf(whale), startingWhale, abs_tol=10)
-            or token.balanceOf(whale) >= startingWhale
+            pytest.approx(token.balanceOf(whale), rel=RELATIVE_APPROX) == starting_whale
         )
     else:
-        assert token.balanceOf(whale) >= startingWhale
+        assert token.balanceOf(whale) >= starting_whale
 
 
 # test changing the debtRatio on a strategy, donating some assets, and then harvesting it
@@ -97,10 +100,8 @@ def test_change_debt_with_profit(
     gov,
     token,
     vault,
-    strategist,
     whale,
     strategy,
-    chain,
     amount,
     sleep_time,
     is_slippery,
@@ -109,8 +110,8 @@ def test_change_debt_with_profit(
     profit_amount,
     destination_strategy,
     use_yswaps,
+    RELATIVE_APPROX,
 ):
-
     ## deposit to the vault after approving
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
@@ -134,7 +135,7 @@ def test_change_debt_with_profit(
     donation = amount
     token.transfer(strategy, donation, {"from": whale})
 
-    # turn off health check since we just took big profit
+    # turn off health check since we just took big profit from our donation
     strategy.setDoHealthCheck(False, {"from": gov})
     (profit, loss) = harvest_strategy(
         use_yswaps,
@@ -145,6 +146,8 @@ def test_change_debt_with_profit(
         profit_amount,
         destination_strategy,
     )
+
+    # record our new strategy params
     new_params = vault.strategies(strategy)
 
     # sleep 5 days hours to allow share price to normalize
@@ -154,35 +157,36 @@ def test_change_debt_with_profit(
     # check to make sure that our debtRatio is about half of our previous debt
     assert new_params["debtRatio"] == currentDebt / 2
 
-    # specifically check that our gain is greater than our donation or at least no more than 10 wei if we get slippage on deposit/withdrawal
+    # specifically check that our profit is greater than our donation or at least no more than 10 wei if we get slippage on deposit/withdrawal
     # yswaps also will not have seen profit from the first donation after only one harvest
     profit = new_params["totalGain"] - prev_params["totalGain"]
     if is_slippery and no_profit or use_yswaps:
-        assert math.isclose(profit, donation, abs_tol=10) or profit >= donation
+        assert pytest.approx(profit, rel=RELATIVE_APPROX) == donation
     else:
         assert profit > donation
         assert profit > 0
 
-    # check that we didn't add any more loss, or at least no more than 10 wei if we get slippage on deposit/withdrawal
+    # check that we didn't add any more loss, and if we did only a little bit if slippery
     if is_slippery:
-        assert math.isclose(
-            new_params["totalLoss"], prev_params["totalLoss"], abs_tol=10
+        assert (
+            pytest.approx(new_params["totalLoss"], rel=RELATIVE_APPROX)
+            == prev_params["totalLoss"]
         )
     else:
         assert new_params["totalLoss"] == prev_params["totalLoss"]
 
-    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available (within 10 wei)
+    # assert that our vault total assets, multiplied by our debtRatio, is about equal to our estimated total assets plus credit available
     # we multiply this by the debtRatio of our strategy out of 10_000 total
-    # a vault only knows it has assets if the strategy has reported. yswaps has extra profit donated to the strategy as well.
+    # a vault only knows it has assets if the strategy has reported. yswaps has extra profit donated to the strategy as well that has not yet been reported.
     if use_yswaps:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
+        assert (
+            pytest.approx(
+                vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
+                rel=RELATIVE_APPROX,
+            )
+            == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
         )
     else:
-        assert math.isclose(
-            vault.totalAssets() * new_params["debtRatio"] / 10_000,
-            strategy.estimatedTotalAssets() + vault.creditAvailable(strategy),
-            abs_tol=10,
-        )
+        assert pytest.approx(
+            vault.totalAssets() * new_params["debtRatio"] / 10_000, rel=RELATIVE_APPROX
+        ) == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
