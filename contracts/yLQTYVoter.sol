@@ -34,7 +34,7 @@ contract yLQTYVoter is Ownable {
     /* ========== STATE VARIABLES ========== */
 
     /// @notice LQTY staking contract
-    ILiquityStaking public lqtyStaking =
+    ILiquityStaking public constant lqtyStaking =
         ILiquityStaking(0x4f9Fbb3f1E99B56e0Fe2892e623Ed36A76Fc605d);
 
     /// @notice LQTY strategy
@@ -53,7 +53,7 @@ contract yLQTYVoter is Ownable {
 
     /// @notice LQTY token address.
     IERC20 public constant lqty =
-        IERC20(0x4f9Fbb3f1E99B56e0Fe2892e623Ed36A76Fc605d);
+        IERC20(0x6DEA81C8171D0bA574754EF6F8b412F2Ed88c54D);
 
     /// @notice This makes sure gov can only sweep out LQTY after a 2-week waiting period.
     uint256 public unstakeQueued;
@@ -95,12 +95,12 @@ contract yLQTYVoter is Ownable {
 
     /* ========== CORE FUNCTIONS ========== */
 
-    function strategyHarvest(uint256 _lqtyAmount) external onlyStrategy {
+    function strategyHarvest() external onlyStrategy {
         address _strategy = strategy;
+        uint256 _lqtyAmount = lqty.balanceOf(address(this));
         if (_lqtyAmount > 0) {
-            lqty.transferFrom(_strategy, address(this), _lqtyAmount);
             lqtyStaking.stake(_lqtyAmount);
-        } else {
+        } else if (stakedBalance() > 0) {
             lqtyStaking.unstake(0);
         }
 
@@ -134,7 +134,9 @@ contract yLQTYVoter is Ownable {
         );
 
         // if we request more than we have, we still just get our whole stake
-        lqtyStaking.unstake(_amount);
+        if (stakedBalance() > 0) {
+            lqtyStaking.unstake(_amount);
+        }
 
         // convert our ether to weth if we have any
         uint256 ethBalance = address(this).balance;
@@ -152,7 +154,7 @@ contract yLQTYVoter is Ownable {
         }
 
         if (wethBalance > 0) {
-            weth.safeTransfer(_strategy, lusdBalance);
+            weth.safeTransfer(_strategy, wethBalance);
         }
 
         uint256 lqtyBalance = lqty.balanceOf(address(this));
@@ -164,6 +166,7 @@ contract yLQTYVoter is Ownable {
 
     // sweep out tokens sent here
     function sweep(address _token) external onlyOwner {
+        require(_token != address(lqty), "can't sweep stake");
         uint256 tokenBalance = IERC20(_token).balanceOf(address(this));
         if (tokenBalance > 0) {
             IERC20(_token).safeTransfer(owner(), tokenBalance);
