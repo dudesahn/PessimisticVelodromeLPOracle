@@ -13,12 +13,15 @@ def test_keepers_and_trade_handler(
     sleep_time,
     profit_whale,
     profit_amount,
-    destination_strategy,
+    target,
     use_yswaps,
     keeper_wrapper,
     trade_factory,
-    lusd_whale,
 ):
+    # no testing needed if we're not using yswaps
+    if not use_yswaps:
+        return
+
     ## deposit to the vault after approving
     starting_whale = token.balanceOf(whale)
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
@@ -26,14 +29,14 @@ def test_keepers_and_trade_handler(
     newWhale = token.balanceOf(whale)
 
     # harvest, store asset amount
-    (profit, loss) = harvest_strategy(
+    (profit, loss, extra) = harvest_strategy(
         use_yswaps,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
 
     # simulate profits
@@ -41,14 +44,14 @@ def test_keepers_and_trade_handler(
     chain.mine(1)
 
     # harvest, store new asset amount
-    (profit, loss) = harvest_strategy(
+    (profit, loss, extra) = harvest_strategy(
         use_yswaps,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
 
     # set our keeper up
@@ -56,37 +59,36 @@ def test_keepers_and_trade_handler(
 
     # here we make sure we can harvest through our keeper wrapper
     keeper_wrapper.harvest(strategy, {"from": profit_whale})
+    print("Keeper wrapper harvest works")
 
     ####### ADD LOGIC AS NEEDED FOR SENDING REWARDS TO STRATEGY #######
-    # send our strategy some LUSD. normally it would be sitting waiting for trade handler but we automatically process it
-    lusd = interface.IERC20(strategy.lusd())
-    lusd.transfer(strategy, 100e18, {"from": lusd_whale})
+    # send our strategy some CRV. normally it would be sitting waiting for trade handler but we automatically process it
+    crv = interface.IERC20(strategy.crv())
+    crv.transfer(strategy, 100e18, {"from": crv_whale})
 
     # whale can't sweep, but trade handler can
     with brownie.reverts():
-        lusd.transferFrom(
-            strategy, whale, lusd.balanceOf(strategy) / 2, {"from": whale}
-        )
+        crv.transferFrom(strategy, whale, crv.balanceOf(strategy) / 2, {"from": whale})
 
-    lusd.transferFrom(
-        strategy, whale, lusd.balanceOf(strategy) / 2, {"from": trade_factory}
+    crv.transferFrom(
+        strategy, whale, crv.balanceOf(strategy) / 2, {"from": trade_factory}
     )
 
     # remove our trade handler
     strategy.removeTradeFactoryPermissions(True, {"from": gov})
     assert strategy.tradeFactory() == ZERO_ADDRESS
-    assert lusd.balanceOf(strategy) > 0
+    assert crv.balanceOf(strategy) > 0
 
     # trade factory now cant sweep
     with brownie.reverts():
-        lusd.transferFrom(
-            strategy, whale, lusd.balanceOf(strategy) / 2, {"from": trade_factory}
+        crv.transferFrom(
+            strategy, whale, crv.balanceOf(strategy) / 2, {"from": trade_factory}
         )
 
     # give back those permissions, now trade factory can sweep
     strategy.updateTradeFactory(trade_factory, {"from": gov})
-    lusd.transferFrom(
-        strategy, whale, lusd.balanceOf(strategy) / 2, {"from": trade_factory}
+    crv.transferFrom(
+        strategy, whale, crv.balanceOf(strategy) / 2, {"from": trade_factory}
     )
 
     # remove again!
@@ -102,15 +104,3 @@ def test_keepers_and_trade_handler(
     # can't set trade factory to zero
     with brownie.reverts():
         strategy.updateTradeFactory(ZERO_ADDRESS, {"from": gov})
-
-    # update our rewards to just LUSD
-    strategy.updateRewards([strategy.lusd()], {"from": gov})
-    assert strategy.rewardsTokens(0) == strategy.lusd()
-
-    # don't have another token here anymore
-    with brownie.reverts():
-        assert strategy.rewardsTokens(1) == ZERO_ADDRESS
-
-    # only gov can update rewards
-    with brownie.reverts():
-        strategy.updateRewards([strategy.lusd()], {"from": whale})

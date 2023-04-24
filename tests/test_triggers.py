@@ -1,7 +1,7 @@
 import brownie
 from brownie import chain, Contract, ZERO_ADDRESS, accounts
 import pytest
-from utils import harvest_strategy
+from utils import harvest_strategy, check_status
 
 # test our harvest triggers
 def test_triggers(
@@ -18,21 +18,22 @@ def test_triggers(
     no_profit,
     profit_whale,
     profit_amount,
-    destination_strategy,
+    target,
     base_fee_oracle,
     use_yswaps,
+    is_gmx,
 ):
     # inactive strategy (0 DR and 0 assets) shouldn't be touched by keepers
     currentDebtRatio = vault.strategies(strategy)["debtRatio"]
     vault.updateStrategyDebtRatio(strategy, 0, {"from": gov})
-    (profit, loss) = harvest_strategy(
+    (profit, loss, extra) = harvest_strategy(
         use_yswaps,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
     tx = strategy.harvestTrigger(0, {"from": gov})
     print("\nShould we harvest? Should be false.", tx)
@@ -60,14 +61,14 @@ def test_triggers(
     assert tx == True
 
     # harvest the credit
-    (profit, loss) = harvest_strategy(
-        use_yswaps,
+    (profit, loss, extra) = harvest_strategy(
+        is_gmx,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
 
     # should trigger false, nothing is ready yet, just harvested
@@ -79,26 +80,12 @@ def test_triggers(
     chain.sleep(sleep_time)
 
     ################# GENERATE CLAIMABLE PROFIT HERE AS NEEDED #################
-    # we simulate minting LUSD fees from liquity's borrower operations to the staking contract so we have claimable yield
-    lusd_borrower = accounts.at(
-        "0xaC5406AEBe35A27691D62bFb80eeFcD7c0093164", force=True
-    )
-    borrower_operations = accounts.at(
-        "0x24179CD81c9e782A4096035f7eC97fB8B783e007", force=True
-    )
-    staking = Contract("0x4f9Fbb3f1E99B56e0Fe2892e623Ed36A76Fc605d")
-    before = staking.getPendingLUSDGain(lusd_borrower)
-    staking.increaseF_LUSD(100_000e18, {"from": borrower_operations})
-    after = staking.getPendingLUSDGain(lusd_borrower)
-    assert after > before
+    # gmx auto-generates claimable fee profit from open positions
+    if not no_profit:
+        # check that we have claimable profit, need this for min and max profit checks below
+        claimable_profit = strategy.claimableProfitInUsdc()
+        assert claimable_profit > 0
 
-    # check that we have claimable profit, need this for min and max profit checks below
-    claimable_profit = strategy.claimableProfitInUsdc()
-    assert claimable_profit > 0
-    claimable_lusd = staking.getPendingLUSDGain(strategy)
-    assert claimable_lusd > 0
-
-    if not (is_slippery and no_profit):
         # update our minProfit so our harvest triggers true
         strategy.setHarvestTriggerParams(1, 1000000e6, {"from": gov})
         tx = strategy.harvestTrigger(0, {"from": gov})
@@ -110,9 +97,9 @@ def test_triggers(
         tx = strategy.harvestTrigger(0, {"from": gov})
         print("\nShould we harvest? Should be true.", tx)
         assert tx == True
-        strategy.setHarvestTriggerParams(90000e6, 150000e6, {"from": gov})
+        strategy.setHarvestTriggerParams(1_000e6, 10_000e6, {"from": gov})
 
-    # set our max delay to 1 day so we trigger true, then set it back to 21 days
+    # set our max delay so we trigger true, then set it back to 21 days
     strategy.setMaxReportDelay(sleep_time - 1)
     tx = strategy.harvestTrigger(0, {"from": gov})
     print("\nShould we harvest? Should be True.", tx)
@@ -120,24 +107,44 @@ def test_triggers(
     strategy.setMaxReportDelay(86400 * 21)
 
     # harvest, wait
-    (profit, loss) = harvest_strategy(
-        use_yswaps,
+    (profit, loss, extra) = harvest_strategy(
+        is_gmx,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
     print("Profit:", profit, "Loss:", loss)
     chain.sleep(sleep_time)
 
     # harvest should trigger false because of oracle
-    base_fee_oracle.setManualBaseFeeBool(False, {"from": gov})
+    base_fee_oracle.setManualBaseFeeBool(False, {"from": base_fee_oracle.governance()})
     tx = strategy.harvestTrigger(0, {"from": gov})
     print("\nShould we harvest? Should be false.", tx)
     assert tx == False
-    base_fee_oracle.setManualBaseFeeBool(True, {"from": gov})
+    base_fee_oracle.setManualBaseFeeBool(True, {"from": base_fee_oracle.governance()})
+
+    # harvest again to get the last of our profit with ySwaps
+    if use_yswaps or is_gmx:
+        (profit, loss, extra) = harvest_strategy(
+            is_gmx,
+            strategy,
+            token,
+            gov,
+            profit_whale,
+            profit_amount,
+            target,
+        )
+
+        # check our current status
+        print("\nAfter yswaps extra harvest")
+        strategy_params = check_status(strategy, vault)
+
+        # make sure we recorded our gain properly
+        if not no_profit:
+            assert profit > 0
 
     # simulate five days of waiting for share price to bump back up
     chain.sleep(86400 * 5)
@@ -145,9 +152,9 @@ def test_triggers(
 
     # withdraw and confirm we made money, or at least that we have about the same
     vault.withdraw({"from": whale})
-    if is_slippery and no_profit:
+    if no_profit:
         assert (
             pytest.approx(token.balanceOf(whale), rel=RELATIVE_APPROX) == starting_whale
         )
     else:
-        assert token.balanceOf(whale) >= starting_whale
+        assert token.balanceOf(whale) > starting_whale

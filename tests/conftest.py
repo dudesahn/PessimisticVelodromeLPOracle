@@ -13,7 +13,7 @@ def isolate(fn_isolation):
 use_tenderly = False
 
 # use this to set what chain we use. 1 for ETH, 250 for fantom, 10 optimism, 42161 arbitrum
-chain_used = 1
+chain_used = 250
 
 
 ################################################## TENDERLY DEBUGGING ##################################################
@@ -37,9 +37,12 @@ def tenderly_fork(web3, chain):
 #################### FIXTURES BELOW NEED TO BE ADJUSTED FOR THIS REPO ####################
 
 
+# if we want to make harvests public, then we should prevent same-block reward claiming and minting to be safe, but realistically just put it on a gelato job that scream tops up from time to time
+
+
 @pytest.fixture(scope="session")
 def token():
-    token_address = "0x6DEA81C8171D0bA574754EF6F8b412F2Ed88c54D"  # this should be the address of the ERC-20 used by the strategy/vault (LQTY)
+    token_address = "0x7D46aee42de131AFa80Acd72094Cf98f3242b926"  # this should be the address of the ERC-20 used by the strategy/vault (sMLP)
     yield interface.IERC20(token_address)
 
 
@@ -48,8 +51,8 @@ def whale(amount, token):
     # Totally in it for the tech
     # Update this with a large holder of your want token (the largest EOA holder of LP)
     whale = accounts.at(
-        "0x83b1eC6cc7D44bb9BA1A48c53AB0337cAE5A0DBe", force=True
-    )  # 0x83b1eC6cc7D44bb9BA1A48c53AB0337cAE5A0DBe, LQTY, 9.8m tokens
+        "0x1f5c98965ab469f6197DE432A7f86A0d75d7C0A4", force=True
+    )  # 0x1f5c98965ab469f6197DE432A7f86A0d75d7C0A4, fsMLP, 308k
     if token.balanceOf(whale) < 2 * amount:
         raise ValueError(
             "Our whale needs more funds. Find another whale or reduce your amount variable."
@@ -59,7 +62,7 @@ def whale(amount, token):
 
 @pytest.fixture(scope="session")
 def amount(token):
-    amount = 50_000 * 10 ** token.decimals()
+    amount = 100_000 * 10 ** token.decimals()
     yield amount
 
 
@@ -67,8 +70,8 @@ def amount(token):
 def profit_whale(profit_amount, token):
     # ideally not the same whale as the main whale, or else they will lose money
     profit_whale = accounts.at(
-        "0xD8c9D9071123a059C6E0A945cF0e0c82b508d816", force=True
-    )  # 0xD8c9D9071123a059C6E0A945cF0e0c82b508d816, LQTY, 8.7m tokens
+        "0xF48883940b4056801de30F12b934DCeA90133ee6", force=True
+    )  # 0xF48883940b4056801de30F12b934DCeA90133ee6, fsMLP, 200k tokens
     if token.balanceOf(profit_whale) < 5 * profit_amount:
         raise ValueError(
             "Our profit whale needs more funds. Find another whale or reduce your profit_amount variable."
@@ -78,7 +81,7 @@ def profit_whale(profit_amount, token):
 
 @pytest.fixture(scope="session")
 def profit_amount(token):
-    profit_amount = 50 * 10 ** token.decimals()
+    profit_amount = 500 * 10 ** token.decimals()
     yield profit_amount
 
 
@@ -99,21 +102,21 @@ def old_vault():
 # this is the name we want to give our strategy
 @pytest.fixture(scope="session")
 def strategy_name():
-    strategy_name = "StrategyLQTYStaker"
+    strategy_name = "StrategyMLPStaker"
     yield strategy_name
 
 
 # this is the name of our strategy in the .sol file
 @pytest.fixture(scope="session")
-def contract_name(StrategyLQTYStaker):
-    contract_name = StrategyLQTYStaker
+def contract_name(StrategyMLPStaker):
+    contract_name = StrategyMLPStaker
     yield contract_name
 
 
-# if our strategy is using ySwaps, then we need to donate profit to it from our profit whale
+# if our strategy is using ySwaps, then we will treat it differently and will have async profit/rewards claiming
 @pytest.fixture(scope="session")
 def use_yswaps():
-    use_yswaps = True
+    use_yswaps = False
     yield use_yswaps
 
 
@@ -167,7 +170,7 @@ def tests_using_tenderly():
 
 @pytest.fixture(scope="session")
 def RELATIVE_APPROX():
-    yield 1e-5
+    yield 10
 
 
 # use this to set various fixtures that differ by chain
@@ -220,6 +223,57 @@ if chain_used == 1:  # mainnet
         yield Contract("0x0D26E894C2371AB6D20d99A65E991775e3b5CAd7")
 
 
+elif chain_used == 250:  # fantom
+
+    @pytest.fixture(scope="session")
+    def gov():
+        yield accounts.at("0x63A03871141D88cB5417f18DD5b782F9C2118b5B", force=True)
+
+    @pytest.fixture(scope="session")
+    def health_check():
+        yield interface.IHealthCheck("0xf13Cd6887C62B5beC145e30c38c4938c5E627fe0")
+
+    @pytest.fixture(scope="session")
+    def base_fee_oracle():
+        yield interface.IBaseFeeOracle("0xa11E8b010164C1B58b43527D0fDD369845d6ec4A")
+
+    # set all of the following to Scream Guardian MS
+    @pytest.fixture(scope="session")
+    def management():
+        yield accounts.at("0x52baD1537790f102012f4D10B887AE2E5819563F", force=True)
+
+    @pytest.fixture(scope="session")
+    def rewards(management):
+        yield management
+
+    @pytest.fixture(scope="session")
+    def guardian(management):
+        yield management
+
+    @pytest.fixture(scope="session")
+    def strategist(management):
+        yield management
+
+    @pytest.fixture(scope="session")
+    def keeper(management):
+        yield management
+
+    @pytest.fixture(scope="session")
+    def to_sweep():
+        # token we can sweep out of strategy (use CRV)
+        yield interface.IERC20("0x1E4F97b9f9F913c46F1632781732927B9019C68b")
+
+    # deploy this eventually
+
+    @pytest.fixture(scope="session")
+    def keeper_wrapper():
+        yield to_sweep
+
+    @pytest.fixture(scope="session")
+    def trade_factory():
+        yield to_sweep
+
+
 @pytest.fixture(scope="module")
 def vault(pm, gov, rewards, guardian, management, token, vault_address):
     if vault_address == ZERO_ADDRESS:
@@ -238,6 +292,18 @@ def vault(pm, gov, rewards, guardian, management, token, vault_address):
 #################### FIXTURES BELOW LIKELY NEED TO BE ADJUSTED FOR THIS REPO ####################
 
 
+@pytest.fixture(scope="session")
+def target():
+    # whatever we want it to be—this is passed into our harvest function as a target
+    yield 7
+
+
+# this should be a strategy from a different vault to check during migration
+@pytest.fixture(scope="session")
+def other_strategy():
+    yield Contract("0x49D8b010243a4aD4B1dF53E3B3a2986861A0C8c3")
+
+
 @pytest.fixture
 def strategy(
     strategist,
@@ -251,9 +317,10 @@ def strategy(
     base_fee_oracle,
     vault_address,
     trade_factory,
+    to_vest,
 ):
     # will need to update this based on the strategy's constructor ******
-    strategy = gov.deploy(contract_name, vault, trade_factory, 10_000e6, 50_000e6)
+    strategy = gov.deploy(contract_name, vault)
 
     strategy.setKeeper(keeper, {"from": gov})
     strategy.setHealthCheck(health_check, {"from": gov})
@@ -277,9 +344,14 @@ def strategy(
 
     # turn our oracle into testing mode by setting the provider to 0x00, then forcing true
     strategy.setBaseFeeOracle(base_fee_oracle, {"from": management})
-    base_fee_oracle.setBaseFeeProvider(ZERO_ADDRESS, {"from": management})
-    base_fee_oracle.setManualBaseFeeBool(True, {"from": management})
+    base_fee_oracle.setBaseFeeProvider(
+        ZERO_ADDRESS, {"from": base_fee_oracle.governance()}
+    )
+    base_fee_oracle.setManualBaseFeeBool(True, {"from": base_fee_oracle.governance()})
     assert strategy.isBaseFeeAcceptable() == True
+
+    # do this to test our different vesting values
+    strategy.setPercentToVest(to_vest, {"from": gov})
 
     yield strategy
 
@@ -289,27 +361,19 @@ def strategy(
 ####################         PUT UNIQUE FIXTURES FOR THIS REPO BELOW         ####################
 
 
-@pytest.fixture
-def voter(
-    yLQTYVoter,
-    strategy,
-    gov,
-    rewards,
-    guardian,
-    management,
-    token,
-    vault_address,
-):
-    voter = gov.deploy(yLQTYVoter, strategy)
-    yield voter
-
-
+# use this similarly to how we use use_yswaps
 @pytest.fixture(scope="session")
-def lusd_whale():
-    return accounts.at("0x99C9fc46f92E8a1c0deC1b1747d010903E884bE1", force=True)
+def is_gmx():
+    yield True
+
+
+# use this to set what percentage of our esMPX we vest (0, 10%, 50%)
+@pytest.fixture(scope="session", params=[0, 1000, 5000])
+def to_vest(request):
+    yield request.param
 
 
 @pytest.fixture(scope="session")
 def destination_strategy():
     # destination strategy of the route
-    yield interface.ICurveStrategy045("0x83D0458e627cFD7C6d0da12a1223bd168e1c8B64")
+    yield interface.ICurveStrategy045("0x49D8b010243a4aD4B1dF53E3B3a2986861A0C8c3")

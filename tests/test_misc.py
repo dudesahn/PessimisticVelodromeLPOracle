@@ -1,5 +1,5 @@
 import pytest
-from utils import harvest_strategy
+from utils import harvest_strategy, check_status
 import brownie
 from brownie import ZERO_ADDRESS, chain, interface
 
@@ -14,33 +14,34 @@ def test_remove_from_withdrawal_queue(
     sleep_time,
     profit_whale,
     profit_amount,
-    destination_strategy,
+    target,
     use_yswaps,
+    is_gmx,
 ):
     ## deposit to the vault after approving
     starting_whale = token.balanceOf(whale)
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    (profit, loss) = harvest_strategy(
-        use_yswaps,
+    (profit, loss, extra) = harvest_strategy(
+        is_gmx,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
 
     # simulate earnings, harvest
     chain.sleep(sleep_time)
-    (profit, loss) = harvest_strategy(
-        use_yswaps,
+    (profit, loss, extra) = harvest_strategy(
+        is_gmx,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
 
     # removing a strategy from the queue shouldn't change its assets
@@ -76,23 +77,24 @@ def test_revoke_strategy_from_vault(
     sleep_time,
     profit_whale,
     profit_amount,
-    destination_strategy,
+    target,
     use_yswaps,
     RELATIVE_APPROX,
+    is_gmx,
 ):
 
     ## deposit to the vault after approving
     starting_whale = token.balanceOf(whale)
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    (profit, loss) = harvest_strategy(
-        use_yswaps,
+    (profit, loss, extra) = harvest_strategy(
+        is_gmx,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
 
     # sleep to earn some yield
@@ -105,21 +107,42 @@ def test_revoke_strategy_from_vault(
 
     # revoke and harvest
     vault.revokeStrategy(strategy.address, {"from": gov})
-    (profit, loss) = harvest_strategy(
-        use_yswaps,
+
+    (profit, loss, extra) = harvest_strategy(
+        is_gmx,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
+
+    # harvest again to get the last of our profit with ySwaps
+    if is_gmx:
+        (profit, loss, extra) = harvest_strategy(
+            is_gmx,
+            strategy,
+            token,
+            gov,
+            profit_whale,
+            profit_amount,
+            target,
+        )
+
+        # check our current status
+        print("\nAfter yswaps extra harvest")
+        strategy_params = check_status(strategy, vault)
+
+        # make sure we recorded our gain properly
+        if not no_profit:
+            assert profit > 0
 
     # confirm we made money, or at least that we have about the same
     vault_assets_after_revoke = vault.totalAssets()
     strategy_assets_after_revoke = strategy.estimatedTotalAssets()
 
-    if is_slippery and no_profit:
+    if no_profit:
         assert (
             pytest.approx(vault_assets_after_revoke, rel=RELATIVE_APPROX)
             == vault_assets_starting
@@ -129,17 +152,11 @@ def test_revoke_strategy_from_vault(
             == vault_holdings_starting + strategy_starting
         )
     else:
-        assert vault_assets_after_revoke >= vault_assets_starting
-        assert token.balanceOf(vault) >= vault_holdings_starting + strategy_starting
+        assert vault_assets_after_revoke > vault_assets_starting
+        assert token.balanceOf(vault) > vault_holdings_starting + strategy_starting
 
-    # should be zero in our strategy unless we use yswaps, then some profit will still be sitting there
-    if use_yswaps:
-        assert (
-            pytest.approx(strategy_assets_after_revoke, rel=RELATIVE_APPROX)
-            == profit_amount
-        )
-    else:
-        assert pytest.approx(strategy_assets_after_revoke, rel=RELATIVE_APPROX) == 0
+    # should be zero in our strategy
+    assert pytest.approx(strategy_assets_after_revoke, rel=RELATIVE_APPROX) == 0
 
     # simulate five days of waiting for share price to bump back up
     chain.sleep(86400 * 5)
@@ -147,12 +164,12 @@ def test_revoke_strategy_from_vault(
 
     # withdraw and confirm we made money, or at least that we have about the same (profit whale has to be different from normal whale)
     vault.withdraw({"from": whale})
-    if is_slippery and no_profit:
+    if no_profit:
         assert (
             pytest.approx(token.balanceOf(whale), rel=RELATIVE_APPROX) == starting_whale
         )
     else:
-        assert token.balanceOf(whale) >= starting_whale
+        assert token.balanceOf(whale) > starting_whale
 
 
 # test the setters on our strategy
@@ -163,6 +180,12 @@ def test_setters(
     whale,
     strategy,
     amount,
+    use_yswaps,
+    profit_whale,
+    profit_amount,
+    target,
+    strategist,
+    is_gmx,
 ):
     # deposit to the vault after approving
     starting_whale = token.balanceOf(whale)
@@ -170,29 +193,36 @@ def test_setters(
     vault.deposit(amount, {"from": whale})
     name = strategy.name()
 
-    # test our setters in baseStrategy and our main strategy
+    # test our setters in baseStrategy
     strategy.setMaxReportDelay(1e18, {"from": gov})
     strategy.setMinReportDelay(100, {"from": gov})
     strategy.setRewards(gov, {"from": gov})
     strategy.setStrategist(gov, {"from": gov})
-    strategy.setHarvestTriggerParams(1000e6, 25_000e6, {"from": gov})
 
-    # have to set voter before you can adjust keepLQTY
-    with brownie.reverts():
-        strategy.setKeepLqty(700, {"from": gov})
-    strategy.setKeepLqty(0, {"from": gov})
-    strategy.setVoter(whale.address, {"from": gov})
-    strategy.setKeepLqty(700, {"from": gov})
+    ######### BELOW WILL NEED TO BE UPDATED BASED SETTERS OUR STRATEGY HAS #########
+    # harvest our credit
+    (profit, loss, extra) = harvest_strategy(
+        is_gmx,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        target,
+    )
 
-    # test our reverts
-    with brownie.reverts():
-        strategy.setKeepLqty(1500, {"from": gov})
+    # check that we have claimable rewards
+    profit = strategy.claimableProfitInUsdc()
+    assert profit > 0
+    print("Claimable Profit:", profit / 1e6)
 
-    with brownie.reverts():
-        strategy.setKeepLqty(0, {"from": whale})
+    strategy.setStrategist(strategist, {"from": gov})
+    name = strategy.name()
+    print("Strategy Name:", name)
 
+    # can't set for than 10,000
     with brownie.reverts():
-        strategy.setVoter(ZERO_ADDRESS, {"from": whale})
+        strategy.setPercentToVest(10_001, {"from": gov})
 
 
 # test sweeping out tokens
@@ -206,20 +236,21 @@ def test_sweep(
     amount,
     profit_whale,
     profit_amount,
-    destination_strategy,
+    target,
     use_yswaps,
+    is_gmx,
 ):
     # deposit to the vault after approving
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    (profit, loss) = harvest_strategy(
-        use_yswaps,
+    (profit, loss, extra) = harvest_strategy(
+        is_gmx,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
 
     # we can sweep out non-want tokens
