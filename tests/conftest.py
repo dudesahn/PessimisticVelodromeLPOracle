@@ -222,7 +222,6 @@ if chain_used == 1:  # mainnet
     def keeper_wrapper():
         yield Contract("0x0D26E894C2371AB6D20d99A65E991775e3b5CAd7")
 
-
 elif chain_used == 250:  # fantom
 
     @pytest.fixture(scope="session")
@@ -280,7 +279,7 @@ def vault(pm, gov, rewards, guardian, management, token, vault_address):
         Vault = pm(config["dependencies"][0]).Vault
         vault = guardian.deploy(Vault)
         vault.initialize(token, gov, rewards, "", "", guardian)
-        vault.setDepositLimit(2 ** 256 - 1, {"from": gov})
+        vault.setDepositLimit(2**256 - 1, {"from": gov})
         vault.setManagement(management, {"from": gov})
     else:
         vault = interface.IVaultFactory045(vault_address)
@@ -340,7 +339,7 @@ def strategy(
                 interface.ICurveStrategy045(strat_address).harvest({"from": gov})
                 vault.removeStrategyFromQueue(strat_address, {"from": gov})
 
-    vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
+    vault.addStrategy(strategy, 10_000, 0, 2**256 - 1, 0, {"from": gov})
 
     # turn our oracle into testing mode by setting the provider to 0x00, then forcing true
     strategy.setBaseFeeOracle(base_fee_oracle, {"from": management})
@@ -371,6 +370,18 @@ def is_gmx():
 @pytest.fixture(scope="session", params=[0, 1000, 5000])
 def to_vest(request):
     yield request.param
+
+
+# our wMLP oracle
+@pytest.fixture(scope="function")
+def oracle(wMlpPessimisticOracle, guardian, strategy, vault):
+    oracle = guardian.deploy(
+        wMlpPessimisticOracle,
+        "0xA3Ea99f8aE06bA0d9A6Cf7618d06AEa4564340E9",
+        strategy.mlp(),
+        vault.address,
+    )
+    yield oracle
 
 
 @pytest.fixture(scope="session")

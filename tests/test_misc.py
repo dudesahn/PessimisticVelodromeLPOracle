@@ -20,7 +20,7 @@ def test_remove_from_withdrawal_queue(
 ):
     ## deposit to the vault after approving
     starting_whale = token.balanceOf(whale)
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss, extra) = harvest_strategy(
         is_gmx,
@@ -85,7 +85,7 @@ def test_revoke_strategy_from_vault(
 
     ## deposit to the vault after approving
     starting_whale = token.balanceOf(whale)
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss, extra) = harvest_strategy(
         is_gmx,
@@ -189,7 +189,7 @@ def test_setters(
 ):
     # deposit to the vault after approving
     starting_whale = token.balanceOf(whale)
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     name = strategy.name()
 
@@ -241,7 +241,7 @@ def test_sweep(
     is_gmx,
 ):
     # deposit to the vault after approving
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss, extra) = harvest_strategy(
         is_gmx,
