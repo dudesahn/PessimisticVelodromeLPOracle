@@ -84,13 +84,9 @@ contract StrategyMLPStaker is BaseStrategy {
         IMorphex(0xd5c313DE2d33bf36014e6c659F13acE112B80a8E);
 
     /// @notice fsMLP, the representation of our staked MLP that the strategy holds.
-    /// @dev When reserved for vesting, this is burned for vMlp.
+    /// @dev When reserved for vesting, this is burned for vestedMlp.
     IMorphex public constant fsMlp =
         IMorphex(0x49A97680938B4F1f73816d1B70C3Ab801FAd124B);
-
-    /// @notice vMLP, tokenized reserved MLP for vesting esMPX to MPX.
-    IMorphex public constant vMlp =
-        IMorphex(0xdBa3A9993833595eAbd2cDE1c235904ad0fD0b86);
 
     /// @notice Address for WFTM, our fee token.
     IERC20 public constant wftm =
@@ -147,7 +143,7 @@ contract StrategyMLPStaker is BaseStrategy {
 
     /// @notice Balance of want (sMLP) reserved for vesting.
     function stakedBalance() public view returns (uint256) {
-        return vMlp.pairAmounts(address(this));
+        return vestedMlp.pairAmounts(address(this));
     }
 
     /// @notice Total assets the strategy holds, sum of staked and reserved MLP.
@@ -398,18 +394,18 @@ contract StrategyMLPStaker is BaseStrategy {
 
     function _vest() internal {
         // determine how much MLP we need to be able to vest a given amount of esMPX
-        uint256 totalToVest = (vMlp.getMaxVestableAmount(address(this)) *
+        uint256 totalToVest = (vestedMlp.getMaxVestableAmount(address(this)) *
             percentToVest) / FEE_DENOMINATOR;
 
         // this is how much esMPX we are already vesting
-        uint256 alreadyVesting = vMlp.balanceOf(address(this));
+        uint256 alreadyVesting = vestedMlp.balanceOf(address(this));
 
         // only add more if we are under our limit
         if (totalToVest > alreadyVesting) {
             uint256 toVest = totalToVest - alreadyVesting;
 
             // determine how much MLP we need to vest the extra esMPX
-            uint256 mlpNeeded = vMlp.getPairAmount(address(this), toVest);
+            uint256 mlpNeeded = vestedMlp.getPairAmount(address(this), toVest);
             if (balanceOfWant() >= mlpNeeded) {
                 vestedMlp.deposit(toVest);
             }
