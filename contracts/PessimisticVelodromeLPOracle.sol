@@ -50,11 +50,6 @@ It has the disadvantage of reducing borrow power of borrowers to a 2-day minimum
 */
 
 contract PessimisticVelodromeLPOracle {
-    struct FeedData {
-        IChainLinkOracle feed;
-        uint8 tokenDecimals;
-    }
-
     /* ========== STATE VARIABLES ========== */
 
     IChainLinkOracle constant sequencerUptimeFeed =
@@ -63,17 +58,20 @@ contract PessimisticVelodromeLPOracle {
     address public operator;
     address public pendingOperator;
 
-    /// @notice Set a hard cap on our LP token price.
-    /// @dev This may be adjusted by operator. This puts a cap on bad debt from oracle errors in a given market.
+    /// @notice Set a hard cap on our LP token price. This puts a cap on bad debt from oracle errors in a given market.
+    /// @dev This may be adjusted by operator.
     mapping(address => uint256) public manualPriceCap;
 
     mapping(address => bool) public hasChainlinkOracle;
-    mapping(address => FeedData) public feeds;
+    mapping(address => address) public feeds;
 
     mapping(address => mapping(uint => uint)) public dailyLows; // token => day => price
 
-    uint256 public points = 24; // 12 hours
-    uint256 public constant DECIMALS = 10 ** 18;
+    /// @notice The number of periods we look back in time for TWAP pricing.
+    /// @dev Each period is 30 mins. Operator can adjust this length as needed.
+    uint256 public points = 4;
+    
+    uint256 internal constant DECIMALS = 10 ** 18;
 
     /* ========== CONSTRUCTOR ========== */
 
@@ -81,22 +79,17 @@ contract PessimisticVelodromeLPOracle {
         operator = _operator;
     }
 
-    modifier onlyOperator() {
-        require(msg.sender == operator, "ONLY OPERATOR");
-        _;
-    }
-
-    /* ========== EVENTS ========== */
+    /* ========== EVENTS/MODIFIERS ========== */
 
     event RecordDailyLow(address indexed token, uint256 price);
     event ManualPriceCapUpdated(address indexed token, uint256 manualPriceCap);
     event UpdatedPoints(uint256 points);
     event ChangeOperator(address indexed newOperator);
+    event SetTokenFeed(address indexed token, address indexed feed);
 
-    /// @notice Current day used for storing daily lows
-    /// @dev Note that this is in unix time
-    function currentDay() public view returns (uint256) {
-        return block.timestamp / 1 days;
+    modifier onlyOperator() {
+        require(msg.sender == operator, "ONLY OPERATOR");
+        _;
     }
 
     /* ========== VIEW FUNCTIONS ========== */
@@ -128,18 +121,15 @@ contract PessimisticVelodromeLPOracle {
     @return Return the unaltered price of the underlying token
     */
     function getChainlinkPrice(address token) public view returns (uint) {
-        (, int256 price, , , ) = feeds[token].feed.latestRoundData();
+        (, int256 price, , , ) = IChainLinkOracle(feeds[token])
+            .latestRoundData();
         if (price <= 0) {
             revert("Invalid feed price");
         }
         // make sure the sequencer is up
-        (
-            ,
-            /*uint80 roundID*/ int256 sequencerAnswer /*uint256 startedAt*/ /*uint256 updatedAt*/ /*uint80 answeredInRound*/,
-            ,
-            ,
-
-        ) = sequencerUptimeFeed.latestRoundData();
+        // uint80 roundID int256 sequencerAnswer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound
+        (, int256 sequencerAnswer, , , ) = sequencerUptimeFeed
+            .latestRoundData();
 
         // Answer == 0: Sequencer is up
         // Answer == 1: Sequencer is down
@@ -147,6 +137,20 @@ contract PessimisticVelodromeLPOracle {
             revert("L2 sequencer down");
         }
         return uint(price);
+    }
+
+    /**
+    @notice Check the last time a token's Chainlink price was updated.
+    @dev Useful to check for price staleness.
+    @param token The address of the token to get the price of
+    @return The timestamp of our last price update.
+    */
+    function chainlinkPriceLastUpdated(
+        address token
+    ) external view returns (uint) {
+        (, , , uint256 updatedAt, ) = IChainLinkOracle(feeds[token])
+            .latestRoundData();
+        return updatedAt;
     }
 
     /**
@@ -168,6 +172,12 @@ contract PessimisticVelodromeLPOracle {
         return pool.quote(_token, _oneToken, points);
     }
 
+    /// @notice Current day used for storing daily lows
+    /// @dev Note that this is in unix time
+    function currentDay() public view returns (uint256) {
+        return block.timestamp / 1 days;
+    }
+
     /* ========== MUTATIVE FUNCTIONS ========== */
 
     /// @notice Checks current token price and saves the price if it is the day's lowest
@@ -177,7 +187,7 @@ contract PessimisticVelodromeLPOracle {
     }
 
     /// @notice Checks current token price and saves the price if it is the day's lowest
-    /// @dev This may only be called by operator. 
+    /// @dev This may only be called by operator.
     function updatePriceOperator(address _token) external onlyOperator {
         _updatePrice(_token, true);
     }
@@ -296,7 +306,7 @@ contract PessimisticVelodromeLPOracle {
 
     function getTokenPrices(
         address _veloPool
-    ) internal view returns (uint256 price0, uint256 price1) {
+    ) public view returns (uint256 price0, uint256 price1) {
         IVeloPool pool = IVeloPool(_veloPool);
         // check if we have chainlink oracle
         (
@@ -310,17 +320,19 @@ contract PessimisticVelodromeLPOracle {
         ) = pool.metadata();
 
         if (hasChainlinkOracle[token0]) {
-            price0 = getChainlinkPrice(token0);
+            price0 = getChainlinkPrice(token0); // returned with 8 decimals
             if (hasChainlinkOracle[token1]) {
-                price1 = getChainlinkPrice(token1);
+                price1 = getChainlinkPrice(token1); // returned with 8 decimals
             } else {
                 // get twap price for token1
-                price1 = getTwapPrice(_veloPool, token1, 10 ** decimals1);
+                price1 = getTwapPrice(_veloPool, token0, decimals0); // returned in decimals1
+                price1 = (price0 * price1) / (decimals1);
             }
         } else if (hasChainlinkOracle[token1]) {
-            price1 = getChainlinkPrice(token1);
+            price1 = getChainlinkPrice(token1); // returned with 8 decimals
             // get twap price for token0
-            price0 = getTwapPrice(_veloPool, token0, 10 ** decimals0);
+            price0 = getTwapPrice(_veloPool, token1, decimals1); // returned in decimals0
+            price0 = (price0 * price1) / (decimals0);
         } else {
             revert("At least one token must have CL oracle");
         }
@@ -350,15 +362,15 @@ contract PessimisticVelodromeLPOracle {
     @dev Even though the price feeds implement the chainlink interface, it's possible to use other price oracle.
     @param token Address of the ERC20 token to set a feed for
     @param feed The chainlink feed of the ERC20 token.
-    @param tokenDecimals uint8 representing the decimal precision of the token
     */
-    function setFeed(
-        address token,
-        IChainLinkOracle feed,
-        uint8 tokenDecimals
-    ) public onlyOperator {
-        hasChainlinkOracle[token] = true;
-        feeds[token] = FeedData(feed, tokenDecimals);
+    function setFeed(address token, address feed) public onlyOperator {
+        if (feed == address(0)) {
+            hasChainlinkOracle[token] = false;
+        } else {
+            hasChainlinkOracle[token] = true;
+        }
+        feeds[token] = feed;
+        emit SetTokenFeed(token, feed);
     }
 
     /**
