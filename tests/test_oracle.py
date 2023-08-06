@@ -64,6 +64,46 @@ def test_oracle(
     price = oracle.getCurrentPrice(pool)
     print("USDC/SNX Price:", price / 1e8)
 
+    # VELO-USDC
+    pool = "0x8134A2fDC127549480865fB8E5A9E8A8a95a54c5"
+    price1, price2 = oracle.getTokenPrices(pool)
+    print("USDC, VELO Prices:", price1 / 1e8, price2 / 1e8)
+
+    price = oracle.getCurrentPrice(pool)
+    print("USDC/VELO Price:", price / 1e8)
+
+    # MAI-USDC
+    pool = "0xE54e4020d1C3afDB312095D90054103E68fe34B0"
+    price1, price2 = oracle.getTokenPrices(pool)
+    print("USDC, MAI Prices:", price1 / 1e8, price2 / 1e8)
+
+    price = oracle.getCurrentPrice(pool)
+    print("USDC/MAI Price:", price / 1e8)
+
+    # OP-USDC
+    pool = "0x0df083de449F75691fc5A36477a6f3284C269108"
+    price1, price2 = oracle.getTokenPrices(pool)
+    print("OP, USDC Prices:", price1 / 1e8, price2 / 1e8)
+
+    price = oracle.getCurrentPrice(pool)
+    print("USDC/OP Price:", price / 1e8)
+
+    # DOLA-USDC
+    pool = "0xB720FBC32d60BB6dcc955Be86b98D8fD3c4bA645"
+    price1, price2 = oracle.getTokenPrices(pool)
+    print("USDC, DOLA Prices:", price1 / 1e8, price2 / 1e8)
+
+    price = oracle.getCurrentPrice(pool)
+    print("USDC/DOLA Price:", price / 1e8)
+
+    # WETH-frxETH
+    pool = "0x3f42Dc59DC4dF5cD607163bC620168f7FF7aB970"
+    price1, price2 = oracle.getTokenPrices(pool)
+    print("WETH, frxETH Prices:", price1 / 1e8, price2 / 1e8)
+
+    price = oracle.getCurrentPrice(pool)
+    print("WETH-frxETH Price:", price / 1e8)
+
 
 #     # check our pricing
 #     result = oracle.latestRoundData({"from": gov})

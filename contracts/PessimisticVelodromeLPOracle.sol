@@ -70,7 +70,7 @@ contract PessimisticVelodromeLPOracle {
     /// @notice The number of periods we look back in time for TWAP pricing.
     /// @dev Each period is 30 mins. Operator can adjust this length as needed.
     uint256 public points = 4;
-    
+
     uint256 internal constant DECIMALS = 10 ** 18;
 
     /* ========== CONSTRUCTOR ========== */
@@ -94,9 +94,9 @@ contract PessimisticVelodromeLPOracle {
 
     /* ========== VIEW FUNCTIONS ========== */
 
-    /// @notice Gets the current price of wMLP colateral
-    /// @dev Return our price using a standard Chainlink aggregator interface
-    /// @return The 48-hour low price of wMLP
+    /// @notice Gets the current price of the LP token.
+    /// @dev Return our price using a standard Chainlink aggregator interface.
+    /// @return The 48-hour low price of our LP token.
     function latestRoundData(
         address _token
     ) public view returns (uint80, int256, uint256, uint256, uint80) {
@@ -281,26 +281,31 @@ contract PessimisticVelodromeLPOracle {
         reserve1 = (reserve1 * DECIMALS) / decimals1;
 
         uint256 k;
-        if (pool.stable()) {
-            k = Math.sqrt(
-                reserve0 *
-                    reserve1 *
-                    reserve1 *
-                    reserve1 +
-                    reserve1 *
-                    reserve0 *
-                    reserve0 *
-                    reserve0
-            ); // xy^3 + yx^3 = k
-        } else {
-            k = Math.sqrt(reserve0 * reserve1); // xy = k
-        }
-
+        uint256 p;
         (uint256 price0, uint256 price1) = getTokenPrices(_lpToken);
 
-        uint256 p = Math.sqrt(price0 * price1); //this is in decimals of chainlink oracle
+        if (pool.stable()) {
+            k = Math.sqrt(
+                1e18 *
+                    Math.sqrt(
+                        (((((reserve0 * reserve1) / 1e18) * reserve1) / 1e18) *
+                            reserve1) +
+                            (((((reserve1 * reserve0) / 1e18) * reserve0) /
+                                1e18) * reserve0)
+                    )
+            ); // xy^3 + yx^3 = k, this is in 1e18
+            p = Math.sqrt(
+                Math.sqrt(
+                    (price0 * price0 * price0 * price1 * price1 * price1) /
+                        (price0 * price0 + price0 * price0)
+                )
+            ); //this is in decimals of chainlink oracle, 1e8
+        } else {
+            k = Math.sqrt(reserve0 * reserve1); // xy = k, this is in 1e18
+            p = Math.sqrt(price0 * price1); //this is in decimals of chainlink oracle, 1e8
+        }
 
-        // we want a and total supply to have same number of decimals so c has decimals of chainlink oracle
+        // we want k and total supply to have same number of decimals so price has decimals of chainlink oracle
         fairReservesPricing = (2 * p * k) / pool.totalSupply();
     }
 
@@ -324,14 +329,18 @@ contract PessimisticVelodromeLPOracle {
             if (hasChainlinkOracle[token1]) {
                 price1 = getChainlinkPrice(token1); // returned with 8 decimals
             } else {
-                // get twap price for token1
-                price1 = getTwapPrice(_veloPool, token0, decimals0); // returned in decimals1
+                // get twap price for token1. this is the amount of token1 we would get from 1 token0
+                price1 =
+                    (decimals1 * decimals1) /
+                    getTwapPrice(_veloPool, token0, decimals0); // returned in decimals1
                 price1 = (price0 * price1) / (decimals1);
             }
         } else if (hasChainlinkOracle[token1]) {
             price1 = getChainlinkPrice(token1); // returned with 8 decimals
             // get twap price for token0
-            price0 = getTwapPrice(_veloPool, token1, decimals1); // returned in decimals0
+            price0 =
+                (decimals0 * decimals0) /
+                getTwapPrice(_veloPool, token1, decimals1); // returned in decimals0
             price0 = (price0 * price1) / (decimals0);
         } else {
             revert("At least one token must have CL oracle");
