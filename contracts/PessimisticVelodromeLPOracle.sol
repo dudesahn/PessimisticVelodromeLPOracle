@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGLP-3.0
 pragma solidity 0.8.17;
 
-//import '../utils/HomoraMath.sol'; // should I just import OZ math instead? probably maybe, worth testing them against each other******
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 
@@ -31,10 +30,6 @@ interface IVeloPool is IERC20 {
 }
 
 interface IChainLinkOracle {
-    function latestAnswer() external view returns (uint256 answer); // should be checking if sequencer is up and also for staleness of prices *******
-
-    function decimals() external view returns (uint8);
-
     function latestRoundData()
         external
         view
@@ -47,34 +42,50 @@ interface IChainLinkOracle {
 The Pessimistic Oracle introduces collateral factor into the pricing formula. It ensures that any given oracle price is dampened to prevent borrowers from borrowing more than the lowest recorded value of their collateral over the past 2 days.
 This has the advantage of making price manipulation attacks more difficult, as an attacker needs to log artificially high lows.
 It has the disadvantage of reducing borrow power of borrowers to a 2-day minimum value of their collateral, where the value must have been seen by the oracle.
+This work builds on that of Inverse Finance (pessimistic oracle), 
 */
 
 contract PessimisticVelodromeLPOracle {
     /* ========== STATE VARIABLES ========== */
 
+    /// @notice Chainlink feed to check that Optimism's sequencer is online.
     IChainLinkOracle constant sequencerUptimeFeed =
         IChainLinkOracle(0x371EAD81c9102C9BF4874A9075FFFf170F2Ee389);
 
+    /// @notice Permissioned functions controlled by operator.
     address public operator;
+
+    /// @notice Pending operator must accept the role before it can be transferred.
+    /// @dev This can help prevent setting to incorrect addresses.
     address public pendingOperator;
 
     /// @notice Set a hard cap on our LP token price. This puts a cap on bad debt from oracle errors in a given market.
     /// @dev This may be adjusted by operator.
     mapping(address => uint256) public manualPriceCap;
 
+    /// @notice Whether or not an underlying token has a Chainlink oracle.
+    /// @dev This may be adjusted by operator.
     mapping(address => bool) public hasChainlinkOracle;
+
+    /// @notice Address of the Chainlink price feed for a given underlying token.
+    /// @dev This may be adjusted by operator.
     mapping(address => address) public feeds;
 
+    /// @notice Daily low price stored per token.
     mapping(address => mapping(uint => uint)) public dailyLows; // token => day => price
 
-    /// @notice The number of periods we look back in time for TWAP pricing.
-    /// @dev Each period is 30 mins. Operator can adjust this length as needed.
-    uint256 public points = 4;
+    /// @notice The default number of periods (points) we look back in time for TWAP pricing.
+    /// @dev Each period is 30 mins. Override via pointsOverride if needed.
+    uint256 public constant defaultPoints = 4;
+
+    /// @notice Whether we use our 48-hour low (pessimistic) pricing or not.
+    bool public usePessimistic = true;
+
+    /// @notice Set custom number of periods our TWAP price should cover.
+    /// @dev This may be adjusted by operator.
+    mapping(address => uint256) public pointsOverride;
 
     uint256 internal constant DECIMALS = 10 ** 18;
-
-    // should add setter to adjust length of pessimistic look-back
-    // make the points a mapping, so different pairs can have different length (for instance, stable pairs can have significantly longer look-backs)
 
     /* ========== CONSTRUCTOR ========== */
 
@@ -86,9 +97,10 @@ contract PessimisticVelodromeLPOracle {
 
     event RecordDailyLow(address indexed token, uint256 price);
     event ManualPriceCapUpdated(address indexed token, uint256 manualPriceCap);
-    event UpdatedPoints(uint256 points);
+    event UpdatedPointsOverride(address pool, uint256 points);
     event ChangeOperator(address indexed newOperator);
     event SetTokenFeed(address indexed token, address indexed feed);
+    event SetUsePessimisticPricing(bool usePessimistic);
 
     modifier onlyOperator() {
         require(msg.sender == operator, "ONLY OPERATOR");
@@ -114,14 +126,18 @@ contract PessimisticVelodromeLPOracle {
 
     /// @notice Gets the current price of wMLP colateral without any corrections
     function getCurrentPrice(address _token) public view returns (uint256) {
-        return _getFairReservesPricing(_token);
+        if (usePessimistic) {
+            return _getPessimisticPrice(_token);
+        } else {
+            return _getFairReservesPricing(_token);
+        }
     }
 
     /**
-    @notice returns the underlying feed price of the given token address
-    @dev Will revert if price is negative or token is not in the oracle
-    @param token The address of the token to get the price of
-    @return Return the unaltered price of the underlying token
+    @notice Returns the Chainlink feed price of the given token address.
+    @dev Will revert if price is negative or feed is not added.
+    @param token The address of the token to get the price of.
+    @return The current price of the underlying token.
     */
     function getChainlinkPrice(address token) public view returns (uint) {
         (, int256 price, , , ) = IChainLinkOracle(feeds[token])
@@ -157,12 +173,12 @@ contract PessimisticVelodromeLPOracle {
     }
 
     /**
-    @notice returns the underlying feed price of the given token address
-    @dev Will revert if price is negative or token is not in the oracle
+    @notice Returns the TWAP price for a token relative to the other token in its pool.
+    @dev Note that we can customize the length of points but we default to 4 points (2 hours).
     @param _pool The address of the LP (pool) token we are using to price our assets with.
     @param _token The address of the token to get the price of, and that we are swapping in.
     @param _oneToken One of the token we are swapping in.
-    @return Amount of the other token we get when swapping in _oneToken over our TWAP period.
+    @return Amount of the other token we get when swapping in _oneToken looking back over our TWAP period.
     */
     function getTwapPrice(
         address _pool,
@@ -170,6 +186,12 @@ contract PessimisticVelodromeLPOracle {
         uint256 _oneToken
     ) public view returns (uint) {
         IVeloPool pool = IVeloPool(_pool);
+
+        // how far back in time should we look?
+        uint256 points = pointsOverride[_pool];
+        if (points == 0) {
+            points = defaultPoints;
+        }
 
         // swapping one of our token gets us this many otherToken, returned in decimals of the other token
         return pool.quote(_token, _oneToken, points);
@@ -185,18 +207,21 @@ contract PessimisticVelodromeLPOracle {
 
     /// @notice Checks current token price and saves the price if it is the day's lowest
     /// @dev This may be called by anyone. Will revert if price drops >25% from previous low.
+    // @param _token LP token to update pricing for.
     function updatePrice(address _token) external {
         _updatePrice(_token, false);
     }
 
     /// @notice Checks current token price and saves the price if it is the day's lowest
-    /// @dev This may only be called by operator.
+    /// @dev This may only be called by operator, use this if we have a massive price drop.
+    // @param _token LP token to update pricing for.
     function updatePriceOperator(address _token) external onlyOperator {
         _updatePrice(_token, true);
     }
 
     /// @notice Checks current LP token prices and saves the price if it is the day's lowest.
     /// @dev This may be called by anyone; the more times it is called the better
+    // @param _allTokens Array of LP token to update pricing for.
     function updateAllPrices(address[] memory _allTokens) external {
         for (uint256 i; i < _allTokens.length; ++i) {
             address _token = _allTokens[i];
@@ -230,6 +255,8 @@ contract PessimisticVelodromeLPOracle {
         // start off with our standard price
         uint256 normalizedPrice = _getFairReservesPricing(_token);
         uint256 day = currentDay();
+
+        //
 
         // get today's low
         uint256 todaysLow = dailyLows[_token][day];
@@ -364,9 +391,19 @@ contract PessimisticVelodromeLPOracle {
 
     /// @notice Set the number of readings we look in the past for TWAP data.
     /// @dev This may only be called by operator. One point = 30 minutes.
-    function setPoints(uint256 _points) external onlyOperator {
-        points = _points;
-        emit UpdatedPoints(_points);
+    function setPointsOverride(
+        address _pool,
+        uint256 _points
+    ) external onlyOperator {
+        pointsOverride[_pool] = _points;
+        emit UpdatedPointsOverride(_pool, _points);
+    }
+
+    /// @notice Set whether we use pessimistic pricing (48-hour low).
+    /// @dev This may only be called by operator.
+    function setUsePessimistic(bool _usePessimistic) external onlyOperator {
+        usePessimistic = _usePessimistic;
+        emit SetUsePessimisticPricing(_usePessimistic);
     }
 
     /**
