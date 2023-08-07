@@ -73,6 +73,9 @@ contract PessimisticVelodromeLPOracle {
 
     uint256 internal constant DECIMALS = 10 ** 18;
 
+    // should add setter to adjust length of pessimistic look-back
+    // make the points a mapping, so different pairs can have different length (for instance, stable pairs can have significantly longer look-backs)
+
     /* ========== CONSTRUCTOR ========== */
 
     constructor(address _operator) {
