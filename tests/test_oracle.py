@@ -475,6 +475,67 @@ def test_oracle_price_manipulation(
     )
 
 
+def test_setters(
+    gov,
+    oracle,
+):
+    # set our chainlink feeds
+    weth_feed = "0x13e3Ee699D1909E989722E753853AE30b17e08c5"
+    weth = "0x4200000000000000000000000000000000000006"
+    oracle.setFeed(weth, weth_feed, {"from": gov})
+
+    # LDO
+    feed = "0x221618871470f78D8a3391d35B77dFb3C0fbc383"
+    token = "0xFdb794692724153d1488CcdBE0C56c252596735F"
+    oracle.setFeed(token, feed, {"from": gov})
+
+    # LUSD
+    feed = "0x9dfc79Aaeb5bb0f96C6e9402671981CdFc424052"
+    token = "0xc40F949F8a4e094D1b49a23ea9241D289B7b2819"
+    oracle.setFeed(token, feed, {"from": gov})
+
+    # OP
+    feed = "0x0D276FC14719f9292D5C1eA2198673d1f4269246"
+    token = "0x4200000000000000000000000000000000000042"
+    oracle.setFeed(token, feed, {"from": gov})
+
+    # SNX
+    feed = "0x2FCF37343e916eAEd1f1DdaaF84458a359b53877"
+    token = "0x8700dAec35aF8Ff88c16BdF0418774CB3D7599B4"
+    oracle.setFeed(token, feed, {"from": gov})
+
+    # USDC
+    feed = "0x16a9FA2FDa030272Ce99B29CF780dFA30361E0f3"
+    token = "0x7F5c764cBc14f9669B88837ca1490cCa17c31607"
+    oracle.setFeed(token, feed, {"from": gov})
+
+    # WBTC
+    feed = "0x718A5788b89454aAE3A028AE9c111A29Be6c2a6F"
+    token = "0x68f180fcCe6836688e9084f035309E29Bf0A2095"
+    oracle.setFeed(token, feed, {"from": gov})
+
+    # wstETH
+    feed = "0x698B585CbC4407e2D54aa898B2600B53C68958f7"
+    token = "0x1F32b1c2345538c0c6f582fCB022739c4A194Ebb"
+    oracle.setFeed(token, feed, {"from": gov})
+
+    # MAI-USDC
+    pool = "0xE54e4020d1C3afDB312095D90054103E68fe34B0"
+    oracle.updatePrice(pool, {"from": gov})
+    price = oracle.getCurrentPrice(pool)
+    print("USDC/MAI LP Price:", "${:,.2f}".format(price / 1e8), "\n")
+
+    # OP-USDC
+    pool = "0x0df083de449F75691fc5A36477a6f3284C269108"
+    # WETH-frxETH
+    pool_2 = "0x3f42Dc59DC4dF5cD607163bC620168f7FF7aB970"
+    oracle.updateManyPrices([pool, pool_2], {"from": gov})
+    price = oracle.getCurrentPrice(pool)
+    print("USDC/MAI LP Price:", "${:,.2f}".format(price / 1e8), "\n")
+    price = oracle.getCurrentPrice(pool_2)
+    print("USDC/OP LP Price:", "${:,.2f}".format(price / 1e8), "\n")
+
+
 #     # check our pricing
 #     result = oracle.latestRoundData({"from": gov})
 #     print("Result:", result[1] / 1e18)
