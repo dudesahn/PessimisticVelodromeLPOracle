@@ -252,6 +252,19 @@ def test_oracle_price_manipulation(
     price = oracle.getCurrentPrice(pool)
     print("USDC/MAI LP Price:", "${:,.2f}".format(price / 1e8), "\n")
 
+    # tBTC-WBTC
+    pool = "0x6e57B9E54ea043a829584B22182ad22bF446926C"
+    price1, price2 = oracle.getTokenPrices(pool)
+    print(
+        "WBTC, tBTC Prices:",
+        "${:,.2f}".format(price1 / 1e8),
+        ",",
+        "${:,.2f}".format(price2 / 1e8),
+    )
+
+    price = oracle.getCurrentPrice(pool)
+    print("WBTC/tBTC LP Price:", "${:,.2f}".format(price / 1e8), "\n")
+
     # OP-USDC
     pool = "0x0df083de449F75691fc5A36477a6f3284C269108"
     price1, price2 = oracle.getTokenPrices(pool)
@@ -297,8 +310,10 @@ def test_oracle_price_manipulation(
     ) / (pool.totalSupply() / 1e18)
     print("Spot price:", "${:,.2f}".format(spot_price))
 
-    price = oracle.getCurrentPrice(pool)
-    print("WETH-OP LP Price:", "${:,.2f}".format(price / 1e8), "\n")
+    price = oracle.getCurrentPrice(pool) / 1e8
+    print("WETH-OP LP Price:", "${:,.2f}".format(price), "\n")
+    price_diff = abs(price - spot_price)
+    print("Price difference OP-WETH:", "${:,.5f}".format(price_diff))
 
     # op whale swaps in a lot, should tank price of OP
     whale = accounts.at("0x790b4086D106Eafd913e71843AED987eFE291c92", force=True)
@@ -326,10 +341,10 @@ def test_oracle_price_manipulation(
     ) / (pool.totalSupply() / 1e18)
     print("LP spot price after manipulation:", "${:,.2f}".format(spot_price))
 
-    price = oracle.getCurrentPrice(pool)
+    price = oracle.getCurrentPrice(pool) / 1e8
     print(
         "WETH-OP Reserve LP Price after manipulation:",
-        "${:,.2f}".format(price / 1e8),
+        "${:,.2f}".format(price),
         "\n",
     )
 
@@ -386,8 +401,10 @@ def test_oracle_price_manipulation(
     ) / (pool.totalSupply() / 1e18)
     print("Spot price:", "${:,.2f}".format(spot_price))
 
-    price = oracle.getCurrentPrice(pool)
-    print("USDC/DOLA LP Price:", "${:,.2f}".format(price / 1e8), "\n")
+    price = oracle.getCurrentPrice(pool) / 1e8
+    print("USDC/DOLA LP Price:", "${:,.2f}".format(price), "\n")
+    price_diff = abs(price - spot_price)
+    print("Price difference DOLA-USDC:", "${:,.5f}".format(price_diff))
 
     # dola whale swaps in a lot, should tank price of DOLA
     whale = accounts.at("0x8Bbd036d018657E454F679E7C4726F7a8ECE2773", force=True)

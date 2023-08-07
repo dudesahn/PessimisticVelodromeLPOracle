@@ -316,18 +316,21 @@ contract PessimisticVelodromeLPOracle {
                     )
             ); // xy^3 + yx^3 = k, p0r0' = p1r1', this is in 1e18
             p = Math.sqrt(
-                Math.sqrt(
-                    (price0 * price0 * price0 * price1 * price1 * price1) /
-                        (price0 * price0 + price0 * price0)
-                )
-            ); //this is in decimals of chainlink oracle, 1e8
+                1e16 *
+                    Math.sqrt(
+                        1e16 *
+                            ((((price0 * price0 * price0 * price1) / 1e16) *
+                                price1 *
+                                price1) / (price0 * price0 + price0 * price0))
+                    )
+            ); // boost this to 1e16 to give us more precision
         } else {
             k = Math.sqrt(reserve0 * reserve1); // xy = k, p0r0' = p1r1', this is in 1e18
-            p = Math.sqrt(price0 * price1); //this is in decimals of chainlink oracle, 1e8
+            p = Math.sqrt(price0 * 1e16 * price1); // boost this to 1e16 to give us more precision
         }
 
         // we want k and total supply to have same number of decimals so price has decimals of chainlink oracle
-        fairReservesPricing = (2 * p * k) / pool.totalSupply();
+        fairReservesPricing = (2 * p * k) / (1e8 * pool.totalSupply());
     }
 
     function getTokenPrices(

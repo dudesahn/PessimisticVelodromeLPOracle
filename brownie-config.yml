@@ -10,6 +10,8 @@ autofetch_sources: True
 dependencies:
   - yearn/yearn-vaults@0.4.6
   - OpenZeppelin/openzeppelin-contracts@4.7.1
+  - OpenZeppelin/openzeppelin-contracts@3.4.0
+  - OpenZeppelin/openzeppelin-contracts-upgradeable@4.9.3
 
 # path remapping to support imports from GitHub/NPM
 compiler:
@@ -18,6 +20,8 @@ compiler:
     remappings:
       - "@yearnvaults=yearn/yearn-vaults@0.4.6"
       - "@openzeppelin=OpenZeppelin/openzeppelin-contracts@4.7.1"
+      - "@oz34=OpenZeppelin/openzeppelin-contracts@3.4.0"
+      - "@oz_ug=OpenZeppelin/openzeppelin-contracts-upgradeable@4.9.3"
 
 reports:
   exclude_contracts:
