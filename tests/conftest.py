@@ -75,6 +75,11 @@ def gov():
     yield accounts.at("0xF5d9D6133b698cE29567a90Ab35CfB874204B3A7", force=True)
 
 
+@pytest.fixture(scope="session")
+def weth():
+    yield interface.IERC20("0x4200000000000000000000000000000000000006")
+
+
 # our oracle
 @pytest.fixture(scope="function")
 def oracle(PessimisticVelodromeLPOracle, gov):
@@ -83,3 +88,13 @@ def oracle(PessimisticVelodromeLPOracle, gov):
         gov,
     )
     yield oracle
+
+
+# midas' oracle, returns values in ETH
+@pytest.fixture(scope="function")
+def midas_oracle(SolidlyLpTokenPriceOracle, gov, weth):
+    midas_oracle = gov.deploy(
+        SolidlyLpTokenPriceOracle,
+        weth,
+    )
+    yield midas_oracle
