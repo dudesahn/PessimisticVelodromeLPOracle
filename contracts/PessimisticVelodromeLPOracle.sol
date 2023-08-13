@@ -141,7 +141,7 @@ contract PessimisticVelodromeLPOracle {
     @param _token The address of the token to get the price of.
     @return The current price of the underlying token.
     */
-    function getChainlinkPrice(address _token) public view returns (uint) {
+    function getChainlinkPrice(address _token) public view returns (uint256) {
         (, int256 price, , , ) = IChainLinkOracle(feeds[_token])
             .latestRoundData();
         if (price <= 0) {
@@ -157,18 +157,18 @@ contract PessimisticVelodromeLPOracle {
         if (sequencerAnswer == 1) {
             revert("L2 sequencer down");
         }
-        return uint(price);
+        return uint256(price);
     }
 
     /**
     @notice Check the last time a token's Chainlink price was updated.
-    @dev Useful to check if a price is stale.
-    @param _token The address of the token to get the price of
+    @dev Useful for external checks if a price is stale.
+    @param _token The address of the token to get the price of.
     @return The timestamp of our last price update.
     */
     function chainlinkPriceLastUpdated(
         address _token
-    ) external view returns (uint) {
+    ) external view returns (uint256) {
         (, , , uint256 updatedAt, ) = IChainLinkOracle(feeds[_token])
             .latestRoundData();
         return updatedAt;
@@ -199,8 +199,8 @@ contract PessimisticVelodromeLPOracle {
         return pool.quote(_token, _oneToken, points);
     }
 
-    /// @notice Current day used for storing daily lows
-    /// @dev Note that this is in unix time
+    /// @notice Current day used for storing daily lows.
+    /// @dev Note that this is in unix time.
     function currentDay() public view returns (uint256) {
         return block.timestamp / 1 days;
     }
@@ -232,7 +232,7 @@ contract PessimisticVelodromeLPOracle {
 
     // internal logic to update our stored daily low pool prices
     function _updatePrice(address _pool) internal {
-        // get fair reserves pricing, then later decide
+        // get current fair reserves pricing
         uint256 currentPrice = _getFairReservesPricing(_pool);
 
         // store price if it's today's low
@@ -263,19 +263,16 @@ contract PessimisticVelodromeLPOracle {
         uint256 twoDayLow = todaysLow > yesterdaysLow && yesterdaysLow > 0
             ? yesterdaysLow
             : todaysLow;
-        if (twoDayLow > 0 && currentPrice > twoDayLow) {
-            return twoDayLow;
-        }
 
         // use a hard cap to protect against oracle pricing errors upwards
         uint256 manualCap = manualPriceCap[_pool];
 
         // if we don't have a cap set then don't worry about it
-        if (manualCap > 0 && currentPrice > manualCap) {
-            currentPrice = manualCap;
+        if (manualCap > 0 && twoDayLow > manualCap) {
+            twoDayLow = manualCap;
         }
 
-        return currentPrice;
+        return twoDayLow;
     }
 
     // calculate price based on fair reserves, not spot reserves
@@ -284,8 +281,7 @@ contract PessimisticVelodromeLPOracle {
     ) internal view returns (uint256 fairReservesPricing) {
         // get what we need to calculate our reserves and pricing
         IVeloPool pool = IVeloPool(_pool);
-        uint256 lpDecimals = pool.decimals();
-        if (lpDecimals != 18) {
+        if (pool.decimals() != 18) {
             revert("Lp token must have 18 decimals");
         }
         (
@@ -302,10 +298,9 @@ contract PessimisticVelodromeLPOracle {
         reserve0 = (reserve0 * DECIMALS) / decimals0;
         reserve1 = (reserve1 * DECIMALS) / decimals1;
 
+        // pull our prices to calculate k and p
         uint256 k;
         uint256 p;
-
-        // pull our prices to calculate k and p
         (uint256 price0, uint256 price1) = getTokenPrices(_pool);
 
         if (pool.stable()) {
@@ -340,7 +335,6 @@ contract PessimisticVelodromeLPOracle {
         address _pool
     ) public view returns (uint256 price0, uint256 price1) {
         IVeloPool pool = IVeloPool(_pool);
-        // check if we have chainlink oracle
         (
             uint256 decimals0, // note that this will be "1e18"", not "18"
             uint256 decimals1,
