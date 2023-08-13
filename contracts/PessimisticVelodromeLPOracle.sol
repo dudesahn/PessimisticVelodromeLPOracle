@@ -41,7 +41,7 @@ interface IChainLinkOracle {
 @notice Oracle used to price Velodrome LP tokens. A pool must contain at least one asset with a Chainlink feed to be valid.
 If only one asset has a Chainlink feed, an internal TWAP may be used to price the other, with a default 2 hour window.
 The pessimistic oracle stores daily lows, and prices are checked over the past 48 hours when calculating an LP's value.
-A manual price cap (upper bound) can be enabled to further prevent manipulations in the upward direction.
+A manual price cap (upper and lower bounds) can be enabled to further prevent manipulations in a given direction.
 With this oracle, price manipulation attacks are substantially more difficult, as an attacker needs to log artificially high lows but still come in under any price cap.
 It has the disadvantage of reducing borrow power of borrowers to a 2-day minimum value of their collateral, where the value must have been seen by the oracle.
 This work builds on that of Inverse Finance (pessimistic oracle), Alpha Homora (fair reserves) and VMEX (xy^3+yx^3=k fair reserves derivation).
@@ -53,13 +53,17 @@ contract PessimisticVelodromeLPOracle {
     /// @notice Daily low price stored per token.
     mapping(address => mapping(uint => uint)) public dailyLows; // token => day => price
 
-    /// @notice Set a hard cap on our LP token price. This puts a cap on bad debt from oracle errors in a given market.
+    /// @notice A hard upper bound on our LP token price. This puts a cap on bad debt from oracle errors in a given market.
     /// @dev This may be adjusted by operator.
-    mapping(address => uint256) public manualPriceCap;
+    mapping(address => uint256) public upperPriceBound;
 
-    /// @notice Whether we use our 48-hour low (pessimistic) pricing or not.
+    /// @notice A hard lower bound on our LP token price. This helps prevent liquidations from artificially low prices.
+    /// @dev This may be adjusted by operator.
+    mapping(address => uint256) public lowerPriceBound;
+
+    /// @notice Whether we use our 48-hour low (pessimistic) pricing or not, along with our upper and lower price bounds.
     /// @dev May only be updated by operator. Defaults to true.
-    bool public usePessimistic = true;
+    bool public useAdjustedPricing = true;
 
     /// @notice Whether we only use Chainlink feeds or allow TWAP for one of the two assets.
     /// @dev May only be updated by operator. Defaults to false.
@@ -106,11 +110,15 @@ contract PessimisticVelodromeLPOracle {
     /* ========== EVENTS/MODIFIERS ========== */
 
     event RecordDailyLow(address indexed token, uint256 price);
-    event ManualPriceCapUpdated(address indexed token, uint256 manualPriceCap);
+    event ManualPriceCapsUpdated(
+        address indexed token,
+        uint256 upperPriceCap,
+        uint256 lowerPriceCap
+    );
     event UpdatedPointsOverride(address pool, uint256 points);
     event ChangeOperator(address indexed newOperator);
     event SetTokenFeed(address indexed token, address indexed feed);
-    event SetUsePessimisticPricing(bool usePessimistic);
+    event SetUseAdjustedPricing(bool useAdjusted);
     event SetUseChainlinkOnly(bool onlyChainlink);
     event ApprovedPriceUpdatooor(address account, bool canEndorse);
 
@@ -128,7 +136,7 @@ contract PessimisticVelodromeLPOracle {
     @return The current price of one LP token.
     */
     function getCurrentPrice(address _pool) public view returns (uint256) {
-        if (usePessimistic) {
+        if (useAdjustedPricing) {
             return _getAdjustedPrice(_pool);
         } else {
             return _getFairReservesPricing(_pool);
@@ -244,7 +252,7 @@ contract PessimisticVelodromeLPOracle {
         }
     }
 
-    // adjust our reported pool price as needed for 48-hour lows and hard upper limit
+    // adjust our reported pool price as needed for 48-hour lows and hard upper/lower limits
     function _getAdjustedPrice(address _pool) internal view returns (uint256) {
         // start off with our standard price
         uint256 currentPrice = _getFairReservesPricing(_pool);
@@ -264,12 +272,14 @@ contract PessimisticVelodromeLPOracle {
             ? yesterdaysLow
             : todaysLow;
 
-        // use a hard cap to protect against oracle pricing errors upwards
-        uint256 manualCap = manualPriceCap[_pool];
+        // use a hard cap to protect against oracle pricing errors
+        uint256 upperBound = upperPriceBound[_pool];
+        uint256 lowerBound = lowerPriceBound[_pool];
 
-        // if we don't have a cap set then don't worry about it
-        if (manualCap > 0 && twoDayLow > manualCap) {
-            twoDayLow = manualCap;
+        if (upperBound > 0 && twoDayLow > upperBound) {
+            revert("Price above upper bound");
+        } else if (twoDayLow < lowerBound) {
+            revert("Price below lower bound");
         }
 
         return twoDayLow;
@@ -377,13 +387,13 @@ contract PessimisticVelodromeLPOracle {
     /* ========== SETTERS ========== */
 
     /*
-    @notice Set whether we use pessimistic pricing (48-hour low).
+    @notice Set whether we use pessimistic pricing (48-hour low) and our price bounds.
     @dev This may only be called by operator. Defaults to true.
-    @param _usePessimistic Use pessimistic pricing, yes or no?
+    @param _useAdjusted Use adjusted pricing, yes or no?
     */
-    function setUsePessimistic(bool _usePessimistic) external onlyOperator {
-        usePessimistic = _usePessimistic;
-        emit SetUsePessimisticPricing(_usePessimistic);
+    function setUseAdjustedPrice(bool _useAdjusted) external onlyOperator {
+        useAdjustedPricing = _useAdjusted;
+        emit SetUseAdjustedPricing(_useAdjusted);
     }
 
     /*
@@ -397,17 +407,23 @@ contract PessimisticVelodromeLPOracle {
     }
 
     /*
-    @notice Set a hard price cap for a given Velodrome LP.
+    @notice Set a hard price caps for a given Velodrome LP.
     @dev This may only be called by operator.
-    @param _pool LP token whose price cap we want to set.
-    @param _manualPriceCap Upper price bound in USD, 8 decimals.
+    @param _pool LP token whose price caps we want to set.
+    @param _upperBound Upper price bound in USD, 8 decimals.
+    @param _lowerBound Lower price bound in USD, 8 decimals.
     */
-    function setManualPriceCap(
+    function setManualPriceCaps(
         address _pool,
-        uint256 _manualPriceCap
+        uint256 _upperBound,
+        uint256 _lowerBound
     ) external onlyOperator {
-        manualPriceCap[_pool] = _manualPriceCap;
-        emit ManualPriceCapUpdated(_pool, _manualPriceCap);
+        if (_lowerBound > _upperBound) {
+            revert("Lower bound cannot be higher than upper");
+        }
+        upperPriceBound[_pool] = _upperBound;
+        lowerPriceBound[_pool] = _lowerBound;
+        emit ManualPriceCapsUpdated(_pool, _upperBound, _lowerBound);
     }
 
     /*
