@@ -39,7 +39,7 @@ interface IChainLinkOracle {
 /**
 @title Velodrome LP Pessimistic Oracle
 @notice Oracle used to price Velodrome LP tokens. A pool must contain at least one asset with a Chainlink feed to be valid.
-If only one asset has a Chainlink feed, an internal TWAP is used to price the other, with a default 2 hour window.
+If only one asset has a Chainlink feed, an internal TWAP may be used to price the other, with a default 2 hour window.
 The pessimistic oracle stores daily lows, and prices are checked over the past 48 hours when calculating an LP's value.
 A manual price cap (upper bound) can be enabled to further prevent manipulations in the upward direction.
 With this oracle, price manipulation attacks are substantially more difficult, as an attacker needs to log artificially high lows but still come in under any price cap.
@@ -61,16 +61,16 @@ contract PessimisticVelodromeLPOracle {
     /// @dev May only be updated by operator. Defaults to true.
     bool public usePessimistic = true;
 
-    /// @notice Whether or not an underlying token has a Chainlink oracle.
-    /// @dev This may be adjusted by operator.
-    mapping(address => bool) public hasChainlinkOracle;
+    /// @notice Whether we only use Chainlink feeds or allow TWAP for one of the two assets.
+    /// @dev May only be updated by operator. Defaults to false.
+    bool public useChainlinkOnly = false;
 
     /// @notice Address of the Chainlink price feed for a given underlying token.
-    /// @dev This may be adjusted by operator.
+    /// @dev May only be updated by operator.
     mapping(address => address) public feeds;
 
     /// @notice Custom number of periods our TWAP price should cover.
-    /// @dev This may be adjusted by operator, default is 4 (2 hours).
+    /// @dev May only be updated by operator, default is 4 (2 hours).
     mapping(address => uint256) public pointsOverride;
 
     /// @notice Chainlink feed to check that Optimism's sequencer is online.
@@ -79,9 +79,10 @@ contract PessimisticVelodromeLPOracle {
         IChainLinkOracle(0x371EAD81c9102C9BF4874A9075FFFf170F2Ee389);
 
     /// @notice Check if an address can update our LP pricing.
+    /// @dev May only be updated by operator.
     mapping(address => bool) public priceUpdatooors;
 
-    /// @notice Permissioned functions controlled by operator.
+    /// @notice Role that controls permissioned functions and setters.
     address public operator;
 
     /// @notice Pending operator must accept the role before it can be transferred.
@@ -110,6 +111,7 @@ contract PessimisticVelodromeLPOracle {
     event ChangeOperator(address indexed newOperator);
     event SetTokenFeed(address indexed token, address indexed feed);
     event SetUsePessimisticPricing(bool usePessimistic);
+    event SetUseChainlinkOnly(bool onlyChainlink);
     event ApprovedPriceUpdatooor(address account, bool canEndorse);
 
     modifier onlyOperator() {
@@ -230,28 +232,28 @@ contract PessimisticVelodromeLPOracle {
 
     // internal logic to update our stored daily low pool prices
     function _updatePrice(address _pool) internal {
-        // get normalized price (pessimistic)
-        uint256 normalizedPrice = _getAdjustedPrice(_pool);
+        // get fair reserves pricing, then later decide
+        uint256 currentPrice = _getFairReservesPricing(_pool);
 
         // store price if it's today's low
         uint256 day = currentDay();
         uint256 todaysLow = dailyLows[_pool][day];
-        if (todaysLow == 0 || normalizedPrice < todaysLow) {
-            dailyLows[_pool][day] = normalizedPrice;
-            emit RecordDailyLow(_pool, normalizedPrice);
+        if (todaysLow == 0 || currentPrice < todaysLow) {
+            dailyLows[_pool][day] = currentPrice;
+            emit RecordDailyLow(_pool, currentPrice);
         }
     }
 
     // adjust our reported pool price as needed for 48-hour lows and hard upper limit
     function _getAdjustedPrice(address _pool) internal view returns (uint256) {
         // start off with our standard price
-        uint256 normalizedPrice = _getFairReservesPricing(_pool);
+        uint256 currentPrice = _getFairReservesPricing(_pool);
         uint256 day = currentDay();
 
         // get today's low
         uint256 todaysLow = dailyLows[_pool][day];
-        if (todaysLow == 0 || normalizedPrice < todaysLow) {
-            todaysLow = normalizedPrice;
+        if (todaysLow == 0 || currentPrice < todaysLow) {
+            todaysLow = currentPrice;
         }
 
         // get yesterday's low
@@ -261,18 +263,19 @@ contract PessimisticVelodromeLPOracle {
         uint256 twoDayLow = todaysLow > yesterdaysLow && yesterdaysLow > 0
             ? yesterdaysLow
             : todaysLow;
-        if (twoDayLow > 0 && normalizedPrice > twoDayLow) {
+        if (twoDayLow > 0 && currentPrice > twoDayLow) {
             return twoDayLow;
         }
 
         // use a hard cap to protect against oracle pricing errors upwards
         uint256 manualCap = manualPriceCap[_pool];
+
         // if we don't have a cap set then don't worry about it
-        if (manualCap > 0 && normalizedPrice > manualCap) {
-            normalizedPrice = manualCap;
+        if (manualCap > 0 && currentPrice > manualCap) {
+            currentPrice = manualCap;
         }
 
-        return normalizedPrice;
+        return currentPrice;
     }
 
     // calculate price based on fair reserves, not spot reserves
@@ -348,18 +351,24 @@ contract PessimisticVelodromeLPOracle {
             address token1
         ) = pool.metadata();
 
-        if (hasChainlinkOracle[token0]) {
+        // check if we have chainlink feeds or TWAP for each token
+        if (feeds[token0] != address(0)) {
             price0 = getChainlinkPrice(token0); // returned with 8 decimals
-            if (hasChainlinkOracle[token1]) {
+            if (feeds[token1] != address(0)) {
                 price1 = getChainlinkPrice(token1); // returned with 8 decimals
             } else {
+                // revert if we are supposed to only use chainlink
+                if (useChainlinkOnly) {
+                    revert("Only Chainlink feeds supported");
+                }
+
                 // get twap price for token1. this is the amount of token1 we would get from 1 token0
                 price1 =
                     (decimals1 * decimals1) /
                     getTwapPrice(_pool, token0, decimals0); // returned in decimals1
                 price1 = (price0 * price1) / (decimals1);
             }
-        } else if (hasChainlinkOracle[token1]) {
+        } else if (feeds[token1] != address(0)) {
             price1 = getChainlinkPrice(token1); // returned with 8 decimals
             // get twap price for token0
             price0 =
@@ -372,6 +381,26 @@ contract PessimisticVelodromeLPOracle {
     }
 
     /* ========== SETTERS ========== */
+
+    /*
+    @notice Set whether we use pessimistic pricing (48-hour low).
+    @dev This may only be called by operator. Defaults to true.
+    @param _usePessimistic Use pessimistic pricing, yes or no?
+    */
+    function setUsePessimistic(bool _usePessimistic) external onlyOperator {
+        usePessimistic = _usePessimistic;
+        emit SetUsePessimisticPricing(_usePessimistic);
+    }
+
+    /*
+    @notice Set whether we use only Chainlink for price feeds.
+    @dev This may only be called by operator. Defaults to true.
+    @param _useChainlinkOnly Use Chainlink only, yes or no?
+    */
+    function setUseChainlinkOnly(bool _useChainlinkOnly) external onlyOperator {
+        useChainlinkOnly = _useChainlinkOnly;
+        emit SetUseChainlinkOnly(_useChainlinkOnly);
+    }
 
     /*
     @notice Set a hard price cap for a given Velodrome LP.
@@ -401,16 +430,6 @@ contract PessimisticVelodromeLPOracle {
         emit UpdatedPointsOverride(_pool, _points);
     }
 
-    /*
-    @notice Set whether we use pessimistic pricing (48-hour low).
-    @dev This may only be called by operator. Defaults to true.
-    @param _usePessimistic Use pessimistic pricing, yes or no?
-    */
-    function setUsePessimistic(bool _usePessimistic) external onlyOperator {
-        usePessimistic = _usePessimistic;
-        emit SetUsePessimisticPricing(_usePessimistic);
-    }
-
     /**
     @notice Sets the price feed of a specific token address.
     @dev Even though the price feeds implement Chainlink's interface, it's possible to create custom feeds.
@@ -418,11 +437,6 @@ contract PessimisticVelodromeLPOracle {
     @param feed The Chainlink feed of the ERC20 token.
     */
     function setFeed(address token, address feed) public onlyOperator {
-        if (feed == address(0)) {
-            hasChainlinkOracle[token] = false;
-        } else {
-            hasChainlinkOracle[token] = true;
-        }
         feeds[token] = feed;
         emit SetTokenFeed(token, feed);
     }
