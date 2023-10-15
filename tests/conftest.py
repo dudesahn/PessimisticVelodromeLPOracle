@@ -1,4 +1,5 @@
 import pytest
+import brownie
 from brownie import config, Contract, ZERO_ADDRESS, chain, interface, accounts
 from eth_abi import encode_single
 import requests
@@ -40,12 +41,6 @@ def tenderly_fork(web3, chain):
 # if we want to make harvests public, then we should prevent same-block reward claiming and minting to be safe, but realistically just put it on a gelato job that scream tops up from time to time
 
 
-@pytest.fixture(scope="session")
-def token():
-    token_address = "0x7D46aee42de131AFa80Acd72094Cf98f3242b926"  # this should be the address of the ERC-20 used by the strategy/vault (sMLP)
-    yield interface.IERC20(token_address)
-
-
 # use this to set the standard amount of time we sleep between harvests.
 # generally 1 day, but can be less if dealing with smaller windows (oracles) or longer if we need to trigger weekly earnings.
 @pytest.fixture(scope="session")
@@ -77,10 +72,21 @@ def tests_using_tenderly():
     ],
     ids=["useAdjustedPrice", "dontUseAdjustedPrice"],
     scope="function",
-    autouse=True,
 )
-def token(oracle, request):
-    oracle.setUseAdjustedPrice(request.param, False)
+def use_adjusted_price(request):
+    yield request.param
+
+
+@pytest.fixture(
+    params=[
+        True,
+        False,
+    ],
+    ids=["three_days", "two_days"],
+    scope="function",
+)
+def use_three_days(request):
+    yield request.param
 
 
 @pytest.fixture(scope="session")
@@ -95,7 +101,7 @@ def weth():
 
 # our oracle
 @pytest.fixture(scope="function")
-def oracle(PessimisticVelodromeLPOracle, gov):
+def oracle(PessimisticVelodromeLPOracle, gov, use_three_days, use_adjusted_price):
     oracle = gov.deploy(
         PessimisticVelodromeLPOracle,
         gov,
@@ -165,6 +171,15 @@ def oracle(PessimisticVelodromeLPOracle, gov):
     feed = "0xa12cddd8e986af9288ab31e58c60e65f2987fb13"
     token = "0x9e1028F5F1D5eDE59748FFceE5532509976840E0"
     oracle.setFeed(token, feed, {"from": gov})
+
+    # just run it again
+    if not use_adjusted_price and use_three_days:
+        with brownie.reverts():
+            oracle.setUseAdjustedPrice(use_adjusted_price, use_three_days)
+        use_three_days = False
+
+    # setup our pricing preferences
+    oracle.setUseAdjustedPrice(use_adjusted_price, use_three_days)
 
     # rETH-WETH exchange rate: 0x22F3727be377781d1579B7C9222382b21c9d1a8f
     yield oracle
