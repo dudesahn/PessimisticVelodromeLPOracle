@@ -5,6 +5,7 @@ from brownie import accounts, Contract, chain, interface
 def test_normal_oracle(
     gov,
     oracle,
+    token,
 ):
     # rETH-WETH, one chainlink
     reth = "0x9Bcef72be871e61ED4fBbc7630889beE758eb81D"
@@ -115,6 +116,7 @@ def test_normal_oracle(
 def test_oracle_price_manipulation(
     gov,
     oracle,
+    token,
 ):
     # OP-WETH (same decimals, volatile, both chainlink)
     # since these are both chainlink, should be very resilient to any manipulation
@@ -327,7 +329,7 @@ def test_oracle_price_manipulation(
         [tbtc.address, weth, False, pool_factory],
     ]
     router.swapExactTokensForTokens(
-        20e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
+        15e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
     price1, price2 = oracle.getTokenPrices(pool)
@@ -509,7 +511,7 @@ def test_oracle_price_manipulation(
         [dola.address, usdc, True, pool_factory],
     ]
     router.swapExactTokensForTokens(
-        9e24, 0, routes, whale.address, 2**256 - 1, {"from": whale}
+        9e23, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
     # DOLA-USDC
@@ -988,6 +990,7 @@ def test_oracle_price_manipulation(
 def test_setters(
     gov,
     oracle,
+    token,
 ):
     # MAI-USDC
     pool = "0xE54e4020d1C3afDB312095D90054103E68fe34B0"
