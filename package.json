@@ -4,7 +4,7 @@
     "@commitlint/cli": "^12.1.4",
     "@commitlint/config-conventional": "^12.1.4",
     "husky": "^7.0.0",
-    "prettier": "^2.3.2",
+    "prettier": "2.3.0",
     "prettier-plugin-solidity": "^1.0.0-beta.13",
     "pretty-quick": "^3.1.1",
     "solhint": "^3.3.6",
@@ -20,5 +20,8 @@
       "pre-commit": "yarn lint:fix",
       "commit-msg": "commitlint -E HUSKY_GIT_PARAMS"
     }
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^4.9.3"
   }
 }
