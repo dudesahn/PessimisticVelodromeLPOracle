@@ -70,6 +70,19 @@ def tests_using_tenderly():
     yield yes_or_no
 
 
+@pytest.fixture(
+    params=[
+        True,
+        False,
+    ],
+    ids=["useAdjustedPrice", "dontUseAdjustedPrice"],
+    scope="function",
+    autouse=True,
+)
+def token(oracle, request):
+    oracle.setUseAdjustedPrice(request.param, False)
+
+
 @pytest.fixture(scope="session")
 def gov():
     yield accounts.at("0xF5d9D6133b698cE29567a90Ab35CfB874204B3A7", force=True)
