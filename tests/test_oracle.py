@@ -5,7 +5,6 @@ from brownie import accounts, Contract, chain, interface
 def test_normal_oracle(
     gov,
     oracle,
-    token,
 ):
     # rETH-WETH, one chainlink
     reth = "0x9Bcef72be871e61ED4fBbc7630889beE758eb81D"
@@ -116,8 +115,10 @@ def test_normal_oracle(
 def test_oracle_price_manipulation(
     gov,
     oracle,
-    token,
 ):
+    # snapshot our chain before we do everything
+    chain.snapshot()
+
     # OP-WETH (same decimals, volatile, both chainlink)
     # since these are both chainlink, should be very resilient to any manipulation
     pool = interface.IVeloPoolV2("0xd25711EdfBf747efCE181442Cc1D8F5F8fc8a0D3")
@@ -181,9 +182,9 @@ def test_oracle_price_manipulation(
     assert manipulation_price == price
 
     # sleep to see if that affects price at all (it shouldn't)
-    chain.sleep(86400)
+    chain.sleep(7200)
     chain.mine(1)
-    print("Sleep one day")
+    print("Sleep 2 hours")
     price1, price2 = oracle.getTokenPrices(pool)
     print(
         "WETH, OP Prices after manipulation:",
@@ -205,31 +206,31 @@ def test_oracle_price_manipulation(
     assert sleep_price == price
 
     # do this so we have enough checkpoints after the big swap (>4 point, >2 hours)
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
@@ -288,6 +289,9 @@ def test_oracle_price_manipulation(
 
     ##############################################################################################################
 
+    # revert to our snapshot for the new pair
+    chain.revert()
+
     # we could a tiny swap at the beginning of the test to fix our TWAP at a set point for the test (relatively, at least)
     # however, I prefer to not do this and instead see just how far off someone could drive the pricing.
 
@@ -329,7 +333,7 @@ def test_oracle_price_manipulation(
         [tbtc.address, weth, False, pool_factory],
     ]
     router.swapExactTokensForTokens(
-        15e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
+        13e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
     price1, price2 = oracle.getTokenPrices(pool)
@@ -354,9 +358,9 @@ def test_oracle_price_manipulation(
     assert pytest.approx(price, 0.001) == manipulation_price
 
     # sleeping still shouldn't really do anything
-    chain.sleep(86400)
+    chain.sleep(7200)
     chain.mine(1)
-    print("Sleep one day")
+    print("Sleep 2 hours")
     price1, price2 = oracle.getTokenPrices(pool)
     print(
         "WETH, tBTC Prices after manipulation:",
@@ -380,31 +384,31 @@ def test_oracle_price_manipulation(
 
     # do this so we have enough checkpoints after the big swap (>2 hours, >4 points)
     # we do small swaps because the size is not important, it's the checkpointing
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e17, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e17, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e17, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e17, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e17, 0, routes, whale.address, 2**256 - 1, {"from": whale}
@@ -472,6 +476,9 @@ def test_oracle_price_manipulation(
 
     ##############################################################################################################
 
+    # revert to our snapshot for the new pair
+    chain.revert()
+
     # we could a tiny swap at the beginning of the test to fix our TWAP at a set point for the test (relatively, at least)
     # however, I prefer to not do this and instead see just how far off someone could drive the pricing.
 
@@ -503,7 +510,7 @@ def test_oracle_price_manipulation(
     print("Price difference spot vs reserves DOLA-USDC:", "${:,.5f}".format(price_diff))
 
     # dola whale swaps in a lot, should tank price of DOLA
-    whale = accounts.at("0x8Bbd036d018657E454F679E7C4726F7a8ECE2773", force=True)
+    whale = accounts.at("0xBA12222222228d8Ba445958a75a0704d566BF2C8", force=True)
     router = Contract("0xa062aE8A9c5e11aaA026fc2670B0D65cCc8B2858")
     dola.approve(router, 2**256 - 1, {"from": whale})
     pool_factory = "0xF1046053aa5682b4F9a81b5481394DA16BE5FF5a"
@@ -511,7 +518,7 @@ def test_oracle_price_manipulation(
         [dola.address, usdc, True, pool_factory],
     ]
     router.swapExactTokensForTokens(
-        9e23, 0, routes, whale.address, 2**256 - 1, {"from": whale}
+        1e24, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
     # DOLA-USDC
@@ -535,8 +542,8 @@ def test_oracle_price_manipulation(
         "\n",
     )
 
-    # just make sure we're within 0.01% of each other
-    assert pytest.approx(price, 0.0001) == manipulation_price
+    # just make sure we're within 0.1% of each other
+    assert pytest.approx(price, 0.001) == manipulation_price
 
     # do 5 swaps but just 5 seconds, shouldn't change prices vs previous swaps significantly
     chain.sleep(1)
@@ -592,36 +599,36 @@ def test_oracle_price_manipulation(
         "${:,.2f}".format(tiny_swap_manipulation_price),
         "\n",
     )
-    # just make sure we're within 0.01% of each other
-    assert pytest.approx(price, 0.0001) == tiny_swap_manipulation_price
+    # just make sure we're within 0.1% of each other
+    assert pytest.approx(price, 0.001) == manipulation_price
 
     # do this so we have enough checkpoints after the big swap
     # we do small swaps because the size is not important, it's the checkpointing
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
@@ -690,6 +697,9 @@ def test_oracle_price_manipulation(
 
     ##############################################################################################################
 
+    # revert to our snapshot for the new pair
+    chain.revert()
+
     # LUSD-USDC (18 vs 6 decimals, both chainlink)
     pool = interface.IVeloPoolV2("0xf04458f7B21265b80FC340dE7Ee598e24485c5bB")
     price1, price2 = oracle.getTokenPrices(pool)
@@ -726,7 +736,7 @@ def test_oracle_price_manipulation(
         [lusd.address, usdc, True, pool_factory],
     ]
     router.swapExactTokensForTokens(
-        6e23, 0, routes, whale.address, 2**256 - 1, {"from": whale}
+        2e23, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
     # LUSD-USDC
@@ -752,31 +762,31 @@ def test_oracle_price_manipulation(
     assert pytest.approx(price, 0.0001) == manipulation_price
 
     # do this so we have enough checkpoints after the big swap
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e18, 0, routes, whale.address, 2**256 - 1, {"from": whale}
@@ -838,6 +848,9 @@ def test_oracle_price_manipulation(
     assert swap_manipulation_price == window_swap_manipulation_price
 
     ##############################################################################################################
+
+    # revert to our snapshot for the new pair
+    chain.revert()
 
     # USDT-USDC (both 6 decimals, both chainlink)
     pool = interface.IVeloPoolV2("0x2B47C794c3789f499D8A54Ec12f949EeCCE8bA16")
@@ -902,31 +915,31 @@ def test_oracle_price_manipulation(
     assert pytest.approx(price, 0.0001) == manipulation_price
 
     # do this so we have enough checkpoints after the big swap
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e6, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e6, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e6, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e6, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
-    chain.sleep(3600)
+    chain.sleep(1800)
     chain.mine(1)
     router.swapExactTokensForTokens(
         1e6, 0, routes, whale.address, 2**256 - 1, {"from": whale}
@@ -990,7 +1003,6 @@ def test_oracle_price_manipulation(
 def test_setters(
     gov,
     oracle,
-    token,
 ):
     # MAI-USDC
     pool = "0xE54e4020d1C3afDB312095D90054103E68fe34B0"

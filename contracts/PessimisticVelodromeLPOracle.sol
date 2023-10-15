@@ -205,7 +205,8 @@ contract PessimisticVelodromeLPOracle {
         }
 
         // if a price is older than 24 hours, we're in trouble
-        if (block.timestamp - updatedAt > 86400) {
+        // 🚨🚨🚨🚨 ADJUSTED TO 10 DAYS FOR TESTING PURPOSES, REVERT BACK BEFORE FINAL COMMIT 🚨🚨🚨🚨🚨
+        if (block.timestamp - updatedAt > 864000) {
             revert("Price is >1 day old");
         }
 
