@@ -40,6 +40,8 @@ interface IChainLinkOracle {
             uint256 updatedAt,
             uint80 answeredInRound
         );
+
+    function decimals() external view returns (uint8);
 }
 
 /**
@@ -65,6 +67,11 @@ interface IChainLinkOracle {
  */
 
 contract PessimisticVelodromeLPOracle {
+    struct FeedInfo {
+        address feedAddress;
+        uint96 heartbeat;
+    }
+
     /* ========== STATE VARIABLES ========== */
 
     /// @notice Daily low price stored per token.
@@ -96,7 +103,7 @@ contract PessimisticVelodromeLPOracle {
 
     /// @notice Address of the Chainlink price feed for a given underlying token.
     /// @dev May only be updated by operator.
-    mapping(address => address) public feeds;
+    mapping(address => FeedInfo) public feeds;
 
     /// @notice Custom number of periods our TWAP price should cover.
     /// @dev May only be updated by operator, default is 4 (2 hours).
@@ -142,7 +149,11 @@ contract PessimisticVelodromeLPOracle {
     );
     event UpdatedPointsOverride(address pool, uint256 points);
     event ChangeOperator(address indexed newOperator);
-    event SetTokenFeed(address indexed token, address indexed feed);
+    event SetTokenFeed(
+        address indexed token,
+        address indexed feed,
+        uint96 heartbeat
+    );
     event SetUseAdjustedPricing(bool useAdjusted, bool useThreeDayWindow);
     event SetUseChainlinkOnly(bool onlyChainlink);
     event ApprovedPriceUpdatooor(address account, bool canEndorse);
@@ -163,7 +174,8 @@ contract PessimisticVelodromeLPOracle {
     function chainlinkPriceLastUpdated(
         address _token
     ) external view returns (uint256 updatedAt) {
-        (, , , updatedAt, ) = IChainLinkOracle(feeds[_token]).latestRoundData();
+        (, , , updatedAt, ) = IChainLinkOracle(feeds[_token].feedAddress)
+            .latestRoundData();
     }
 
     /// @notice Current day used for storing daily lows.
@@ -196,18 +208,22 @@ contract PessimisticVelodromeLPOracle {
         address _token
     ) public view returns (uint256 currentPrice) {
         (, int256 price, , uint256 updatedAt, ) = IChainLinkOracle(
-            feeds[_token]
+            feeds[_token].feedAddress
         ).latestRoundData();
+
+        // we always expect 8 decimals for USD pricing
+        if (IChainLinkOracle(feeds[_token].feedAddress).decimals() != 8) {
+            revert("Must be 8 decimals");
+        }
 
         // you mean we can't have negative prices?
         if (price <= 0) {
             revert("Invalid feed price");
         }
 
-        // if a price is older than 24 hours, we're in trouble
-        // 🚨🚨🚨🚨 ADJUSTED TO 10 DAYS FOR TESTING PURPOSES, REVERT BACK BEFORE FINAL COMMIT 🚨🚨🚨🚨🚨
-        if (block.timestamp - updatedAt > 864000) {
-            revert("Price is >1 day old");
+        // if a price is older than our preset heartbeat, we're in trouble
+        if (block.timestamp - updatedAt > feeds[_token].heartbeat) {
+            revert("Price is stale");
         }
 
         // make sure the sequencer is up
@@ -505,10 +521,16 @@ contract PessimisticVelodromeLPOracle {
      * @dev Even though the price feeds implement Chainlink's interface, it's possible to create custom feeds.
      * @param _token Address of the ERC20 token to set a feed for
      * @param _feed The Chainlink feed of the ERC20 token.
+     * @param _heartbeat The heartbeat for our feed (maximum time allowed before refresh).
      */
-    function setFeed(address _token, address _feed) public onlyOperator {
-        feeds[_token] = _feed;
-        emit SetTokenFeed(_token, _feed);
+    function setFeed(
+        address _token,
+        address _feed,
+        uint96 _heartbeat
+    ) public onlyOperator {
+        feeds[_token].feedAddress = _feed;
+        feeds[_token].heartbeat = _heartbeat;
+        emit SetTokenFeed(_token, _feed, _heartbeat);
     }
 
     /**
