@@ -106,71 +106,71 @@ def oracle(PessimisticVelodromeLPOracle, gov, use_three_days, use_adjusted_price
         PessimisticVelodromeLPOracle,
         gov,
     )
-    # set our chainlink feeds
+    # set our chainlink feeds, 10 day heartbeat
     # WETH
     feed = "0x13e3Ee699D1909E989722E753853AE30b17e08c5"
     token = "0x4200000000000000000000000000000000000006"
-    oracle.setFeed(token, feed, {"from": gov})
+    oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # LDO
     feed = "0x221618871470f78D8a3391d35B77dFb3C0fbc383"
     token = "0xFdb794692724153d1488CcdBE0C56c252596735F"
-    oracle.setFeed(token, feed, {"from": gov})
+    oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # LUSD
     feed = "0x9dfc79Aaeb5bb0f96C6e9402671981CdFc424052"
     token = "0xc40F949F8a4e094D1b49a23ea9241D289B7b2819"
-    oracle.setFeed(token, feed, {"from": gov})
+    oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # OP
     feed = "0x0D276FC14719f9292D5C1eA2198673d1f4269246"
     token = "0x4200000000000000000000000000000000000042"
-    oracle.setFeed(token, feed, {"from": gov})
+    oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # SNX
     feed = "0x2FCF37343e916eAEd1f1DdaaF84458a359b53877"
     token = "0x8700dAec35aF8Ff88c16BdF0418774CB3D7599B4"
-    oracle.setFeed(token, feed, {"from": gov})
+    oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # USDC
     feed = "0x16a9FA2FDa030272Ce99B29CF780dFA30361E0f3"
     token = "0x7F5c764cBc14f9669B88837ca1490cCa17c31607"
-    oracle.setFeed(token, feed, {"from": gov})
+    oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # WBTC
     feed = "0x718A5788b89454aAE3A028AE9c111A29Be6c2a6F"
     token = "0x68f180fcCe6836688e9084f035309E29Bf0A2095"
-    oracle.setFeed(token, feed, {"from": gov})
+    oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # wstETH
     feed = "0x698B585CbC4407e2D54aa898B2600B53C68958f7"
     token = "0x1F32b1c2345538c0c6f582fCB022739c4A194Ebb"
-    oracle.setFeed(token, feed, {"from": gov})
+    oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # FRAX
     feed = "0xc7d132becabe7dcc4204841f33bae45841e41d9c"
     token = "0x2E3D870790dC77A83DD1d18184Acc7439A53f475"
-    oracle.setFeed(token, feed, {"from": gov})
+    oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # USDT
     feed = "0xecef79e109e997bca29c1c0897ec9d7b03647f5e"
     token = "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58"
-    oracle.setFeed(token, feed, {"from": gov})
+    oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # DAI
     feed = "0x8dba75e83da73cc766a7e5a0ee71f656bab470d6"
     token = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
-    oracle.setFeed(token, feed, {"from": gov})
+    oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # sUSD
     feed = "0x7f99817d87bad03ea21e05112ca799d715730efe"
     token = "0x8c6f28f2F1A3C87F0f938b96d27520d9751ec8d9"
-    oracle.setFeed(token, feed, {"from": gov})
+    oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # PERP
     feed = "0xa12cddd8e986af9288ab31e58c60e65f2987fb13"
     token = "0x9e1028F5F1D5eDE59748FFceE5532509976840E0"
-    oracle.setFeed(token, feed, {"from": gov})
+    oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # just run it again
     if not use_adjusted_price and use_three_days:
