@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGLP-3.0
 pragma solidity 0.8.19;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/math/Math.sol";
+import {IERC20} from "@openzeppelin/contracts@4.9.3/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts@4.9.3/utils/math/Math.sol";
 
 interface IVeloPool is IERC20 {
     function quote(
@@ -46,9 +46,10 @@ interface IChainLinkOracle {
 
 /**
  * @title Velodrome LP Pessimistic Oracle
- * @notice Oracle used to price Velodrome LP tokens. A pool must contain at least one asset with a Chainlink feed to be
- *  valid. If only one asset has a Chainlink feed, an internal TWAP may be used to price the other asset , with a default
- *  2 hour window.
+ * @author Yearn Finance
+ * @notice This oracle may be used to price Velodrome-style LP pools (both vAMM and sAMM) in a manipulation-resistant
+ *  manner. A pool must contain at least one asset with a Chainlink feed to be valid. If only one asset has a Chainlink
+ *  feed, an internal TWAP may be used to price the other asset , with a default 2 hour window.
  *
  *  The pessimistic oracle stores daily lows, and prices are checked over the past two (or three) days of stored data
  *  when calculating an LP's value. A manual price cap (upper and lower bounds) may be enabled to further limit the
@@ -128,6 +129,9 @@ contract PessimisticVelodromeLPOracle {
     /// @notice The default number of periods (points) we look back in time for TWAP pricing.
     /// @dev Each period is 30 mins, so default is 2 hours. Override via pointsOverride if needed.
     uint256 public constant DEFAULT_POINTS = 4;
+
+    /// @notice Used to track the deployed version of this contract.
+    string public constant apiVersion = "1.0.0";
 
     // our pool/LP token decimals, just in case velodrome has weird pools in the future with different decimals
     uint256 internal constant DECIMALS = 10 ** 18;
@@ -279,9 +283,9 @@ contract PessimisticVelodromeLPOracle {
         ) = pool.metadata();
 
         // check if we have chainlink feeds or TWAP for each token
-        if (feeds[token0] != address(0)) {
+        if (feeds[token0].feedAddress != address(0)) {
             price0 = getChainlinkPrice(token0); // returned with 8 decimals
-            if (feeds[token1] != address(0)) {
+            if (feeds[token1].feedAddress != address(0)) {
                 price1 = getChainlinkPrice(token1); // returned with 8 decimals
             } else {
                 // revert if we are supposed to only use chainlink
@@ -295,7 +299,7 @@ contract PessimisticVelodromeLPOracle {
                     getTwapPrice(_pool, token0, decimals0); // returned in decimals1
                 price1 = (price0 * price1) / (decimals1);
             }
-        } else if (feeds[token1] != address(0)) {
+        } else if (feeds[token1].feedAddress != address(0)) {
             price1 = getChainlinkPrice(token1); // returned with 8 decimals
             // get twap price for token0
             price0 =

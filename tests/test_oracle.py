@@ -736,7 +736,7 @@ def test_oracle_price_manipulation(
         [lusd.address, usdc, True, pool_factory],
     ]
     router.swapExactTokensForTokens(
-        2e23, 0, routes, whale.address, 2**256 - 1, {"from": whale}
+        1e23, 0, routes, whale.address, 2**256 - 1, {"from": whale}
     )
 
     # LUSD-USDC
