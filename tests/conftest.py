@@ -1,7 +1,6 @@
 import pytest
 import brownie
 from brownie import config, Contract, ZERO_ADDRESS, chain, interface, accounts
-from eth_abi import encode_single
 import requests
 
 
@@ -18,6 +17,7 @@ chain_used = 10
 
 
 ################################################## TENDERLY DEBUGGING ##################################################
+
 
 # change autouse to True if we want to use this fork to help debug tests
 @pytest.fixture(scope="session", autouse=use_tenderly)
@@ -120,6 +120,16 @@ def oracle(PessimisticVelodromeLPOracle, gov, use_three_days, use_adjusted_price
     # LUSD
     feed = "0x9dfc79Aaeb5bb0f96C6e9402671981CdFc424052"
     token = "0xc40F949F8a4e094D1b49a23ea9241D289B7b2819"
+    oracle.setFeed(token, feed, 864000, {"from": gov})
+
+    # DAI
+    feed = "0x8dBa75e83DA73cc766A7e5a0ee71F656BAb470d6"
+    token = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
+    oracle.setFeed(token, feed, 864000, {"from": gov})
+
+    # FRAX
+    feed = "0xc7D132BeCAbE7Dcc4204841F33bae45841e41D9C"
+    token = "0x2E3D870790dC77A83DD1d18184Acc7439A53f475"
     oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # OP
