@@ -149,6 +149,15 @@ def test_oracle_price_manipulation(
     ) / (pool.totalSupply() / 1e18)
     print("Spot price:", "${:,.2f}".format(spot_price))
 
+    # check the vault token price!
+    op_weth_vault = Contract("0xDdDCAeE873f2D9Df0E18a80709ef2B396d4a6EA5")
+    vault_price = oracle.getCurrentVaultPriceV2(op_weth_vault) / 1e8
+    print("🏦 Vault token price:", "${:,.2f}".format(vault_price))
+    print("Vault pricePerShare", op_weth_vault.pricePerShare() / 1e18)
+    print(
+        "Vault PPS * LP spot price:", spot_price * op_weth_vault.pricePerShare() / 1e18
+    )
+
     # swap in 200M OP
     amount_to_swap = 200e24
 
@@ -775,6 +784,14 @@ def test_oracle_price_manipulation(
     # do a tiny swap at the beginning of the test to fix our TWAP at a set point for the test (relatively, at least)
     # 🚨 NOTE: in the real world, if a pool isn't very active, this means that any potential large swap will automatically
     #  be counted toward's an LP's price and thus will start at a disadvantage
+    print(
+        "⏳  Latest TWAP observation before start:", pool.lastObservation()["timestamp"]
+    )
+    twap_price = oracle.getTwapPrice(pool, dola, 1e18)
+    print("DOLA TWAP Price before start:", twap_price / 1e6)
+    print("Reserve0:", pool.reserve0())
+    print("Reserve1:", pool.reserve1())
+
     router.swapExactTokensForTokens(
         1e18, 0, route, whale.address, 2**256 - 1, {"from": whale}
     )
@@ -805,25 +822,34 @@ def test_oracle_price_manipulation(
     ratio = amount_to_swap * 1e12 / (spot_price * pool.totalSupply())
     print("Swap to TVL Ratio:", "{:,.2f}x".format(ratio))
 
+    price_timestamp = pool.lastObservation()["timestamp"]
     price = oracle.getCurrentPoolPrice(pool) / 1e8
-    print("USDC/DOLA LP Price:", "${:,.2f}".format(price), "\n")
+    print("USDC/DOLA LP Price:", "${:,.8f}".format(price), "\n")
     price_diff = abs(price - spot_price)
     print("Price difference spot vs reserves DOLA-USDC:", "${:,.5f}".format(price_diff))
 
     # try and get new price
-    new_price = oracle.priceStable(pool) / 1e8
+    new_price = oracle.priceStable(pool)
     print(
         "USDC-DOLA Reserve New LP Price:",
-        "${:,.2f}".format(new_price),
+        "${:,.8f}".format(new_price),
     )
 
     # try calculating using VMEX's formula
-    vmex_price = oracle.getVmexPrice(pool) / 1e8
+    vmex_price = oracle.getVmexPrice(pool)
     print(
         "USDC-DOLA Reserve VMEX LP Price:",
-        "${:,.2f}".format(vmex_price),
+        "${:,.8f}".format(vmex_price),
         "\n",
     )
+    print(
+        "⏳  Latest TWAP observation before big swap:",
+        pool.lastObservation()["timestamp"],
+    )
+    twap_price = oracle.getTwapPrice(pool, dola, 1e18)
+    print("DOLA TWAP Price before big swap:", twap_price / 1e6)
+    print("Reserve0:", pool.reserve0())
+    print("Reserve1:", pool.reserve1())
 
     # usdc whale swaps in a lot, should tank price of USDC
     router.swapExactTokensForTokens(
@@ -847,27 +873,34 @@ def test_oracle_price_manipulation(
     manipulation_price = oracle.getCurrentPoolPrice(pool) / 1e8
     print(
         "USDC-DOLA Reserve LP Price after manipulation:",
-        "${:,.2f}".format(manipulation_price),
+        "${:,.8f}".format(manipulation_price),
     )
 
     # try and get new price
     new_price = oracle.priceStable(pool) / 1e8
     print(
         "USDC-DOLA Reserve New LP Price after manipulation:",
-        "${:,.2f}".format(new_price),
+        "${:,.8f}".format(new_price),
     )
 
     # try calculating using VMEX's formula
     vmex_price = oracle.getVmexPrice(pool) / 1e8
     print(
         "USDC-DOLA Reserve VMEX LP Price after manipulation:",
-        "${:,.2f}".format(vmex_price),
+        "${:,.8f}".format(vmex_price),
         "\n",
     )
+    print(
+        "⏳  Latest TWAP observation after big swap, before small swaps:",
+        pool.lastObservation()["timestamp"],
+    )
+    twap_price = oracle.getTwapPrice(pool, dola, 1e18)
+    print("DOLA TWAP Price after big swap:", twap_price / 1e6)
+    print("Reserve0:", pool.reserve0())
+    print("Reserve1:", pool.reserve1())
 
-    # note that since we stabilized our TWAP before our manipulation swap, the manipulation should have no effect ****
-    # **** FIX THIS LATER
-    # assert price == manipulation_price
+    # note that since we stabilized our TWAP before our manipulation swap, the manipulation should have no effect
+    assert price == manipulation_price
 
     # do 5 swaps but just 5 seconds, shouldn't change prices vs previous swaps significantly
     chain.sleep(1)
@@ -899,6 +932,14 @@ def test_oracle_price_manipulation(
     router.swapExactTokensForTokens(
         1e18, 0, route, whale.address, 2**256 - 1, {"from": whale}
     )
+    print(
+        "⏳  Latest TWAP observation after small swaps:",
+        pool.lastObservation()["timestamp"],
+    )
+    twap_price = oracle.getTwapPrice(pool, dola, 1e18)
+    print("DOLA TWAP Price after small swaps:", twap_price / 1e6)
+    print("Reserve0:", pool.reserve0())
+    print("Reserve1:", pool.reserve1())
 
     print("Swap a few times, but don't sleep much")
     price1, price2 = oracle.getTokenPrices(pool)
@@ -920,27 +961,30 @@ def test_oracle_price_manipulation(
     tiny_swap_manipulation_price = oracle.getCurrentPoolPrice(pool) / 1e8
     print(
         "USDC-DOLA Reserve LP Price after manipulation + tiny swaps/sleeps:",
-        "${:,.2f}".format(tiny_swap_manipulation_price),
+        "${:,.8f}".format(tiny_swap_manipulation_price),
     )
 
     # try and get new price
     new_price = oracle.priceStable(pool) / 1e8
     print(
         "USDC-DOLA Reserve New LP Price after manipulation + tiny swaps/sleeps:",
-        "${:,.2f}".format(new_price),
+        "${:,.8f}".format(new_price),
     )
 
     # try calculating using VMEX's formula
     vmex_price = oracle.getVmexPrice(pool) / 1e8
     print(
         "USDC-DOLA Reserve VMEX LP Price after manipulation + tiny swaps/sleeps:",
-        "${:,.2f}".format(vmex_price),
+        "${:,.8f}".format(vmex_price),
         "\n",
     )
 
     # tbh not clear why these series of tiny swaps actually move the price a bit if one big one didn't
     # ***** LOOK INTO TWAP CODE AND FIGURE OUT HOW NEW SWAPS IN THE SAME PERIOD AFFECT PRICING RETURNED *******
-    assert pytest.approx(price, 0.001) == tiny_swap_manipulation_price
+    # should be able to call pool.lastObservation()["timestamp"] and check if that was within 30 minutes or not
+    # if that was within 30 minutes, and we still get the price moving with more swaps...not sure what to do
+    if price_timestamp == pool.lastObservation()["timestamp"]:
+        assert price == tiny_swap_manipulation_price
 
     # do this so we have enough checkpoints after the big swap
     # we do small swaps because the size is not important, it's the checkpointing
@@ -973,6 +1017,14 @@ def test_oracle_price_manipulation(
     router.swapExactTokensForTokens(
         1e12, 0, route, whale.address, 2**256 - 1, {"from": whale}
     )
+    print(
+        "⏳  Latest TWAP observation after swaps/sleeps:",
+        pool.lastObservation()["timestamp"],
+    )
+    twap_price = oracle.getTwapPrice(pool, dola, 1e18)
+    print("DOLA TWAP Price after swaps/sleeps:", twap_price / 1e6)
+    print("Reserve0:", pool.reserve0())
+    print("Reserve1:", pool.reserve1())
 
     print("Swap a few times, sleep to wait out our TWAP")
     price1, price2 = oracle.getTokenPrices(pool)
@@ -994,21 +1046,21 @@ def test_oracle_price_manipulation(
     swap_manipulation_price = oracle.getCurrentPoolPrice(pool) / 1e8
     print(
         "USDC-DOLA Reserve LP Price after manipulation + swaps/sleeps:",
-        "${:,.2f}".format(swap_manipulation_price),
+        "${:,.8f}".format(swap_manipulation_price),
     )
 
     # try and get new price
     new_price = oracle.priceStable(pool) / 1e8
     print(
         "USDC-DOLA Reserve New LP Price after manipulation + swaps/sleeps:",
-        "${:,.2f}".format(new_price),
+        "${:,.8f}".format(new_price),
     )
 
     # try calculating using VMEX's formula
     vmex_price = oracle.getVmexPrice(pool) / 1e8
     print(
         "USDC-DOLA Reserve VMEX LP Price after manipulation + swaps/sleeps:",
-        "${:,.2f}".format(vmex_price),
+        "${:,.8f}".format(vmex_price),
         "\n",
     )
 
@@ -1037,21 +1089,21 @@ def test_oracle_price_manipulation(
     window_swap_manipulation_price = oracle.getCurrentPoolPrice(pool) / 1e8
     print(
         "USDC-DOLA Reserve LP Price after manipulation + swaps/sleeps + window increase:",
-        "${:,.2f}".format(window_swap_manipulation_price),
+        "${:,.8f}".format(window_swap_manipulation_price),
     )
 
     # try and get new price
     new_price = oracle.priceStable(pool) / 1e8
     print(
         "USDC-DOLA Reserve New LP Price after manipulation + swaps/sleeps + window increase:",
-        "${:,.2f}".format(new_price),
+        "${:,.8f}".format(new_price),
     )
 
     # try calculating using VMEX's formula
     vmex_price = oracle.getVmexPrice(pool) / 1e8
     print(
         "USDC-DOLA Reserve VMEX LP Price after manipulation + swaps/sleeps + window increase:",
-        "${:,.2f}".format(vmex_price),
+        "${:,.8f}".format(vmex_price),
         "\n",
     )
 

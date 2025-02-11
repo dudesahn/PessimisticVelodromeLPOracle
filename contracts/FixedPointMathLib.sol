@@ -5,7 +5,6 @@ pragma solidity >=0.8.0;
 /// @author Solmate (https://github.com/Rari-Capital/solmate/blob/main/src/utils/FixedPointMathLib.sol)
 /// @author Inspired by USM (https://github.com/usmfum/USM/blob/master/contracts/WadMath.sol)
 library FixedPointMathLib {
-
     uint256 internal constant WAD = 1e18; // The scalar of ETH and most ERC20s.
 
     function mulWadDown(uint256 x, uint256 y) internal pure returns (uint256) {

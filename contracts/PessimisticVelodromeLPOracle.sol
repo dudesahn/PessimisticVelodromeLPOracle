@@ -97,7 +97,7 @@ contract PessimisticVelodromeLPOracle {
     uint256 public constant DEFAULT_POINTS = 4;
 
     /// @notice Used to track the deployed version of this contract.
-    string public constant apiVersion = "1.1.0";
+    string public constant apiVersion = "2.0.0dev1";
 
     // our pool/LP token decimals, just in case velodrome has weird pools in the future with different decimals
     uint256 internal constant DECIMALS = 10 ** 18;
@@ -585,8 +585,9 @@ contract PessimisticVelodromeLPOracle {
         emit ChangeOperator(operator);
     }
 
-    ///// EXTRA SHIT
+    ///// EXTRA FUNCTIONS FOR TESTING
 
+    // pulled directly from Midas Protocol
     function priceStable(
         address _pool
     ) external view virtual returns (uint256) {
@@ -640,6 +641,7 @@ contract PessimisticVelodromeLPOracle {
         return (Math.sqrt(sqrtK) * 1e18) / t_s;
     }
 
+    // pulled directly from VMEX Protocol
     function getVmexPrice(
         address _pool
     ) external view virtual returns (uint256) {
