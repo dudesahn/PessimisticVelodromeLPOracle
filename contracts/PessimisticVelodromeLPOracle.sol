@@ -1,55 +1,21 @@
 // SPDX-License-Identifier: AGLP-3.0
-pragma solidity 0.8.19;
+pragma solidity ^0.8.19;
 
-import {IERC20} from "@openzeppelin/contracts@4.9.3/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts@4.9.3/utils/math/Math.sol";
-
-interface IVeloPool is IERC20 {
-    function quote(
-        address tokenIn,
-        uint256 amountIn,
-        uint256 granularity
-    ) external view returns (uint256);
-
-    function metadata()
-        external
-        view
-        returns (
-            uint256 dec0,
-            uint256 dec1,
-            uint256 r0,
-            uint256 r1,
-            bool st,
-            address t0,
-            address t1
-        );
-
-    function decimals() external view returns (uint8);
-
-    function stable() external view returns (bool);
-}
-
-interface IChainLinkOracle {
-    function latestRoundData()
-        external
-        view
-        returns (
-            uint80 roundId,
-            int256 answer,
-            uint256 startedAt,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        );
-
-    function decimals() external view returns (uint8);
-}
+import {IERC4626} from "@openzeppelin/contracts@4.9.3/interfaces/IERC4626.sol";
+import {IYearnVaultV2} from "./interfaces/IYearnVaultV2.sol";
+import {IVeloPool} from "./interfaces/IVeloPool.sol";
+import {IChainLinkOracle} from "./interfaces/IChainLinkOracle.sol";
+import {ShareValueHelper} from "./ShareValueHelper.sol";
+import {FixedPointMathLib} from "./FixedPointMathLib.sol";
 
 /**
  * @title Velodrome LP Pessimistic Oracle
  * @author Yearn Finance
  * @notice This oracle may be used to price Velodrome-style LP pools (both vAMM and sAMM) in a manipulation-resistant
  *  manner. A pool must contain at least one asset with a Chainlink feed to be valid. If only one asset has a Chainlink
- *  feed, an internal TWAP may be used to price the other asset , with a default 2 hour window.
+ *  feed, an internal TWAP may be used to price the other asset , with a default 2 hour window. Version 2.0.0 added
+ *  view functions for pricing V2 and V3 Yearn vault tokens built on top of Velodrome LPs.
  *
  *  The pessimistic oracle stores daily lows, and prices are checked over the past two (or three) days of stored data
  *  when calculating an LP's value. A manual price cap (upper and lower bounds) may be enabled to further limit the
@@ -131,7 +97,7 @@ contract PessimisticVelodromeLPOracle {
     uint256 public constant DEFAULT_POINTS = 4;
 
     /// @notice Used to track the deployed version of this contract.
-    string public constant apiVersion = "1.0.0";
+    string public constant apiVersion = "1.1.0";
 
     // our pool/LP token decimals, just in case velodrome has weird pools in the future with different decimals
     uint256 internal constant DECIMALS = 10 ** 18;
@@ -189,12 +155,62 @@ contract PessimisticVelodromeLPOracle {
     }
 
     /*
+     * @notice Gets the current price of Yearn V3 Velodrome vault token.
+     * @dev Will use fair reserves and pessimistic pricing if enabled, and account for vault profits.
+     * @param _pool LP token whose price we want to check.
+     * @return The current price of one LP token.
+     */
+    function getCurrentVaultPriceV3(
+        address _vault
+    ) external view returns (uint256) {
+        IERC4626 vault = IERC4626(_vault);
+        address _pool = vault.asset();
+
+        if (useAdjustedPricing) {
+            return
+                (_getAdjustedPrice(_pool) * vault.convertToAssets(DECIMALS)) /
+                DECIMALS;
+        } else {
+            return
+                (_getFairReservesPricing(_pool) *
+                    vault.convertToAssets(DECIMALS)) / DECIMALS;
+        }
+    }
+
+    /*
+     * @notice Gets the current price of Yearn V2 Velodrome vault token.
+     * @dev Will use fair reserves and pessimistic pricing if enabled, and account for vault profits.
+     * @param _pool LP token whose price we want to check.
+     * @return The current price of one LP token.
+     */
+    function getCurrentVaultPriceV2(
+        address _vault
+    ) external view returns (uint256) {
+        IYearnVaultV2 vault = IYearnVaultV2(_vault);
+        address _pool = vault.token();
+
+        if (useAdjustedPricing) {
+            return
+                (_getAdjustedPrice(_pool) *
+                    ShareValueHelper.sharesToAmount(_vault, DECIMALS)) /
+                DECIMALS;
+        } else {
+            return
+                (_getFairReservesPricing(_pool) *
+                    ShareValueHelper.sharesToAmount(_vault, DECIMALS)) /
+                DECIMALS;
+        }
+    }
+
+    /*
      * @notice Gets the current price of a given Velodrome LP token.
      * @dev Will use fair reserves and pessimistic pricing if enabled.
      * @param _pool LP token whose price we want to check.
      * @return The current price of one LP token.
      */
-    function getCurrentPrice(address _pool) public view returns (uint256) {
+    function getCurrentPoolPrice(
+        address _pool
+    ) external view returns (uint256) {
         if (useAdjustedPricing) {
             return _getAdjustedPrice(_pool);
         } else {
@@ -567,5 +583,136 @@ contract PessimisticVelodromeLPOracle {
         operator = pendingOperator;
         pendingOperator = address(0);
         emit ChangeOperator(operator);
+    }
+
+    ///// EXTRA SHIT
+
+    function priceStable(
+        address _pool
+    ) external view virtual returns (uint256) {
+        // get what we need to calculate our reserves and pricing
+        IVeloPool pool = IVeloPool(_pool);
+        if (pool.decimals() != 18) {
+            revert("Lp token must have 18 decimals");
+        }
+        (
+            uint256 decimals0, // note that this will be "1e18"", not "18"
+            uint256 decimals1,
+            uint256 r0,
+            uint256 r1,
+            ,
+            ,
+
+        ) = pool.metadata();
+
+        // make sure our reserves are normalized to 18 decimals (looking at you, USDC)
+        r0 = (r0 * DECIMALS) / decimals0;
+        r1 = (r1 * DECIMALS) / decimals1;
+
+        // pull our prices to calculate k and p
+        (uint256 P_x, uint256 P_y) = getTokenPrices(_pool);
+
+        uint256 sqrt4K = _sqrt4k(r0, r1, pool.totalSupply());
+
+        uint256 denomFirstTerm = (P_x ** 2) * P_y + P_y ** 3;
+        uint256 denomSecondTerm = (P_y ** 2) * P_x + P_x ** 3;
+
+        // scale numerator up by sqrt(sqrt(10**16)) = 10**4 to avoid rounding errors
+        uint256 firstTerm = (P_x *
+            Math.sqrt(Math.sqrt((10 ** 16 * P_x ** 3) / denomFirstTerm))) /
+            10 ** 4;
+        uint256 secondTerm = (P_y *
+            Math.sqrt(Math.sqrt((10 ** 16 * P_y ** 3) / denomSecondTerm))) /
+            10 ** 4;
+
+        return (sqrt4K * (firstTerm + secondTerm)) / 1e18;
+    }
+
+    function _sqrt4k(
+        uint256 r0,
+        uint256 r1,
+        uint256 t_s
+    ) public pure returns (uint256) {
+        // sqrt4K = sqrt(sqrt((r0**3) * r1 + (r0**3) * r1)) / t_s;
+        uint256 r03r1 = ((((r0 ** 2 / 10 ** 18) * r0) / 10 ** 18) * r1);
+        uint256 r13r0 = ((((r1 ** 2 / 10 ** 18) * r1) / 10 ** 18) * r0);
+        uint256 sqrtK = 10 ** 18 * Math.sqrt(r03r1 + r13r0);
+        return (Math.sqrt(sqrtK) * 1e18) / t_s;
+    }
+
+    function getVmexPrice(
+        address _pool
+    ) external view virtual returns (uint256) {
+        // get what we need to calculate our reserves and pricing
+        IVeloPool pool = IVeloPool(_pool);
+        if (pool.decimals() != 18) {
+            revert("Lp token must have 18 decimals");
+        }
+        (
+            uint256 decimals0, // note that this will be "1e18"", not "18"
+            uint256 decimals1,
+            uint256 r0,
+            uint256 r1,
+            ,
+            ,
+
+        ) = pool.metadata();
+
+        // make sure our reserves are normalized to 18 decimals (looking at you, USDC)
+        r0 = (r0 * DECIMALS) / decimals0;
+        r1 = (r1 * DECIMALS) / decimals1;
+
+        // pull our prices to calculate k and p (8 decimals from our oracle)
+        (uint256 price0, uint256 price1) = getTokenPrices(_pool);
+        return
+            calculate_stable_lp_token_price(
+                pool.totalSupply(),
+                price0,
+                price1,
+                r0,
+                r1,
+                8
+            );
+    }
+
+    //solves for cases where curve is x^3 * y + y^3 * x = k
+    //fair reserves math formula author: @ksyao2002
+    function calculate_stable_lp_token_price(
+        uint256 total_supply,
+        uint256 price0,
+        uint256 price1,
+        uint256 reserve0,
+        uint256 reserve1,
+        uint256 priceDecimals
+    ) internal pure returns (uint256) {
+        uint256 k = getK(reserve0, reserve1);
+        //fair_reserves = ( (k * (price0 ** 3) * (price1 ** 3)) )^(1/4) / ((price0 ** 2) + (price1 ** 2));
+        price0 *= 1e18 / (10 ** priceDecimals); //convert to 18 dec
+        price1 *= 1e18 / (10 ** priceDecimals);
+        uint256 a = FixedPointMathLib.rpow(price0, 3, 1e18); //keep same decimals as chainlink
+        uint256 b = FixedPointMathLib.rpow(price1, 3, 1e18);
+        uint256 c = FixedPointMathLib.rpow(price0, 2, 1e18);
+        uint256 d = FixedPointMathLib.rpow(price1, 2, 1e18);
+
+        uint256 p0 = k * FixedPointMathLib.mulWadDown(a, b); //2*18 decimals
+
+        uint256 fair = p0 / (c + d); // number of decimals is 18
+
+        // each sqrt divides the num decimals by 2. So need to replenish the decimals midway through with another 1e18
+        uint256 frth_fair = FixedPointMathLib.sqrt(
+            FixedPointMathLib.sqrt(fair * 1e18) * 1e18
+        ); // number of decimals is 18
+
+        return 2 * ((frth_fair * (10 ** priceDecimals)) / total_supply); // converts to chainlink decimals
+    }
+
+    function getK(uint256 x, uint256 y) internal pure returns (uint256) {
+        //x, n, scalar
+        uint256 x_cubed = FixedPointMathLib.rpow(x, 3, 1e18);
+        uint256 newX = FixedPointMathLib.mulWadDown(x_cubed, y);
+        uint256 y_cubed = FixedPointMathLib.rpow(y, 3, 1e18);
+        uint256 newY = FixedPointMathLib.mulWadDown(y_cubed, x);
+
+        return newX + newY; //18 decimals
     }
 }
