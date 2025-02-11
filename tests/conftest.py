@@ -122,16 +122,6 @@ def oracle(PessimisticVelodromeLPOracle, gov, use_three_days, use_adjusted_price
     token = "0xc40F949F8a4e094D1b49a23ea9241D289B7b2819"
     oracle.setFeed(token, feed, 864000, {"from": gov})
 
-    # DAI
-    feed = "0x8dBa75e83DA73cc766A7e5a0ee71F656BAb470d6"
-    token = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
-    oracle.setFeed(token, feed, 864000, {"from": gov})
-
-    # FRAX
-    feed = "0xc7D132BeCAbE7Dcc4204841F33bae45841e41D9C"
-    token = "0x2E3D870790dC77A83DD1d18184Acc7439A53f475"
-    oracle.setFeed(token, feed, 864000, {"from": gov})
-
     # OP
     feed = "0x0D276FC14719f9292D5C1eA2198673d1f4269246"
     token = "0x4200000000000000000000000000000000000042"
