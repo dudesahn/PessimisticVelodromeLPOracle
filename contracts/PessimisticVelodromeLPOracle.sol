@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGLP-3.0
 pragma solidity ^0.8.19;
 
-import {Math} from "@openzeppelin/contracts@4.9.3/utils/math/Math.sol";
 import {IERC4626} from "@openzeppelin/contracts@4.9.3/interfaces/IERC4626.sol";
 import {IYearnVaultV2} from "./interfaces/IYearnVaultV2.sol";
 import {IVeloPool} from "./interfaces/IVeloPool.sol";
@@ -29,8 +28,8 @@ import {FixedPointMathLib} from "./FixedPointMathLib.sol";
  *  disadvantage of reducing borrow power of borrowers to a multi-day minimum value of their collateral, where the price
  *  also must have been seen by the oracle.
  *
- *  This work builds on that of Inverse Finance (pessimistic oracle), Alpha Homora (fair reserves) and VMEX (xy^3+yx^3=k
- *  fair reserves derivation).
+ *  This work builds on that of Inverse Finance (pessimistic pricing oracle), Alpha Homora (x*y=k fair reserves) and
+ *  VMEX (xy^3+yx^3=k fair reserves derivation).
  */
 
 contract PessimisticVelodromeLPOracle {
@@ -97,7 +96,7 @@ contract PessimisticVelodromeLPOracle {
     uint256 public constant DEFAULT_POINTS = 4;
 
     /// @notice Used to track the deployed version of this contract.
-    string public constant apiVersion = "2.0.0dev1";
+    string public constant apiVersion = "2.0.0";
 
     // our pool/LP token decimals, just in case velodrome has weird pools in the future with different decimals
     uint256 internal constant DECIMALS = 10 ** 18;
@@ -436,37 +435,66 @@ contract PessimisticVelodromeLPOracle {
         reserve0 = (reserve0 * DECIMALS) / decimals0;
         reserve1 = (reserve1 * DECIMALS) / decimals1;
 
-        // pull our prices to calculate k and p
-        uint256 k;
-        uint256 p;
+        // pull our prices
         (uint256 price0, uint256 price1) = getTokenPrices(_pool);
 
         if (pool.stable()) {
-            k = Math.sqrt(
-                1e18 *
-                    Math.sqrt(
-                        (((((reserve0 * reserve1) / 1e18) * reserve1) / 1e18) *
-                            reserve1) +
-                            (((((reserve1 * reserve0) / 1e18) * reserve0) /
-                                1e18) * reserve0)
-                    )
-            ); // xy^3 + yx^3 = k, p0r0' = p1r1', this is in 1e18
-            p = Math.sqrt(
-                1e16 *
-                    Math.sqrt(
-                        1e16 *
-                            ((((price0 * price0 * price0 * price1) / 1e16) *
-                                price1 *
-                                price1) / (price0 * price0 + price0 * price0))
-                    )
-            ); // boost this to 1e16 to give us more precision
+            fairReservesPricing = _calculate_stable_lp_token_price(
+                pool.totalSupply(),
+                price0,
+                price1,
+                reserve0,
+                reserve1,
+                8
+            );
         } else {
-            k = Math.sqrt(reserve0 * reserve1); // xy = k, p0r0' = p1r1', this is in 1e18
-            p = Math.sqrt(price0 * 1e16 * price1); // boost this to 1e16 to give us more precision
-        }
+            uint256 k = FixedPointMathLib.sqrt(reserve0 * reserve1); // xy = k, p0r0' = p1r1', this is in 1e18
+            uint256 p = FixedPointMathLib.sqrt(price0 * 1e16 * price1); // boost this to 1e16 to give us more precision
 
-        // we want k and total supply to have same number of decimals so price has decimals of chainlink oracle
-        fairReservesPricing = (2 * p * k) / (1e8 * pool.totalSupply());
+            // we want k and total supply to have same number of decimals so price has decimals of chainlink oracle
+            fairReservesPricing = (2 * p * k) / (1e8 * pool.totalSupply());
+        }
+    }
+
+    //solves for cases where curve is x^3 * y + y^3 * x = k
+    //fair reserves math formula author: @ksyao2002
+    function _calculate_stable_lp_token_price(
+        uint256 total_supply,
+        uint256 price0,
+        uint256 price1,
+        uint256 reserve0,
+        uint256 reserve1,
+        uint256 priceDecimals
+    ) internal pure returns (uint256) {
+        uint256 k = _getK(reserve0, reserve1);
+        //fair_reserves = ( (k * (price0 ** 3) * (price1 ** 3)) )^(1/4) / ((price0 ** 2) + (price1 ** 2));
+        price0 *= 1e18 / (10 ** priceDecimals); //convert to 18 dec
+        price1 *= 1e18 / (10 ** priceDecimals);
+        uint256 a = FixedPointMathLib.rpow(price0, 3, 1e18); //keep same decimals as chainlink
+        uint256 b = FixedPointMathLib.rpow(price1, 3, 1e18);
+        uint256 c = FixedPointMathLib.rpow(price0, 2, 1e18);
+        uint256 d = FixedPointMathLib.rpow(price1, 2, 1e18);
+
+        uint256 p0 = k * FixedPointMathLib.mulWadDown(a, b); //2*18 decimals
+
+        uint256 fair = p0 / (c + d); // number of decimals is 18
+
+        // each sqrt divides the num decimals by 2. So need to replenish the decimals midway through with another 1e18
+        uint256 frth_fair = FixedPointMathLib.sqrt(
+            FixedPointMathLib.sqrt(fair * 1e18) * 1e18
+        ); // number of decimals is 18
+
+        return 2 * ((frth_fair * (10 ** priceDecimals)) / total_supply); // converts to chainlink decimals
+    }
+
+    function _getK(uint256 x, uint256 y) internal pure returns (uint256) {
+        //x, n, scalar
+        uint256 x_cubed = FixedPointMathLib.rpow(x, 3, 1e18);
+        uint256 newX = FixedPointMathLib.mulWadDown(x_cubed, y);
+        uint256 y_cubed = FixedPointMathLib.rpow(y, 3, 1e18);
+        uint256 newY = FixedPointMathLib.mulWadDown(y_cubed, x);
+
+        return newX + newY; //18 decimals
     }
 
     /* ========== SETTERS ========== */
@@ -583,138 +611,5 @@ contract PessimisticVelodromeLPOracle {
         operator = pendingOperator;
         pendingOperator = address(0);
         emit ChangeOperator(operator);
-    }
-
-    ///// EXTRA FUNCTIONS FOR TESTING
-
-    // pulled directly from Midas Protocol
-    function priceStable(
-        address _pool
-    ) external view virtual returns (uint256) {
-        // get what we need to calculate our reserves and pricing
-        IVeloPool pool = IVeloPool(_pool);
-        if (pool.decimals() != 18) {
-            revert("Lp token must have 18 decimals");
-        }
-        (
-            uint256 decimals0, // note that this will be "1e18"", not "18"
-            uint256 decimals1,
-            uint256 r0,
-            uint256 r1,
-            ,
-            ,
-
-        ) = pool.metadata();
-
-        // make sure our reserves are normalized to 18 decimals (looking at you, USDC)
-        r0 = (r0 * DECIMALS) / decimals0;
-        r1 = (r1 * DECIMALS) / decimals1;
-
-        // pull our prices to calculate k and p
-        (uint256 P_x, uint256 P_y) = getTokenPrices(_pool);
-
-        uint256 sqrt4K = _sqrt4k(r0, r1, pool.totalSupply());
-
-        uint256 denomFirstTerm = (P_x ** 2) * P_y + P_y ** 3;
-        uint256 denomSecondTerm = (P_y ** 2) * P_x + P_x ** 3;
-
-        // scale numerator up by sqrt(sqrt(10**16)) = 10**4 to avoid rounding errors
-        uint256 firstTerm = (P_x *
-            Math.sqrt(Math.sqrt((10 ** 16 * P_x ** 3) / denomFirstTerm))) /
-            10 ** 4;
-        uint256 secondTerm = (P_y *
-            Math.sqrt(Math.sqrt((10 ** 16 * P_y ** 3) / denomSecondTerm))) /
-            10 ** 4;
-
-        return (sqrt4K * (firstTerm + secondTerm)) / 1e18;
-    }
-
-    function _sqrt4k(
-        uint256 r0,
-        uint256 r1,
-        uint256 t_s
-    ) public pure returns (uint256) {
-        // sqrt4K = sqrt(sqrt((r0**3) * r1 + (r0**3) * r1)) / t_s;
-        uint256 r03r1 = ((((r0 ** 2 / 10 ** 18) * r0) / 10 ** 18) * r1);
-        uint256 r13r0 = ((((r1 ** 2 / 10 ** 18) * r1) / 10 ** 18) * r0);
-        uint256 sqrtK = 10 ** 18 * Math.sqrt(r03r1 + r13r0);
-        return (Math.sqrt(sqrtK) * 1e18) / t_s;
-    }
-
-    // pulled directly from VMEX Protocol
-    function getVmexPrice(
-        address _pool
-    ) external view virtual returns (uint256) {
-        // get what we need to calculate our reserves and pricing
-        IVeloPool pool = IVeloPool(_pool);
-        if (pool.decimals() != 18) {
-            revert("Lp token must have 18 decimals");
-        }
-        (
-            uint256 decimals0, // note that this will be "1e18"", not "18"
-            uint256 decimals1,
-            uint256 r0,
-            uint256 r1,
-            ,
-            ,
-
-        ) = pool.metadata();
-
-        // make sure our reserves are normalized to 18 decimals (looking at you, USDC)
-        r0 = (r0 * DECIMALS) / decimals0;
-        r1 = (r1 * DECIMALS) / decimals1;
-
-        // pull our prices to calculate k and p (8 decimals from our oracle)
-        (uint256 price0, uint256 price1) = getTokenPrices(_pool);
-        return
-            calculate_stable_lp_token_price(
-                pool.totalSupply(),
-                price0,
-                price1,
-                r0,
-                r1,
-                8
-            );
-    }
-
-    //solves for cases where curve is x^3 * y + y^3 * x = k
-    //fair reserves math formula author: @ksyao2002
-    function calculate_stable_lp_token_price(
-        uint256 total_supply,
-        uint256 price0,
-        uint256 price1,
-        uint256 reserve0,
-        uint256 reserve1,
-        uint256 priceDecimals
-    ) internal pure returns (uint256) {
-        uint256 k = getK(reserve0, reserve1);
-        //fair_reserves = ( (k * (price0 ** 3) * (price1 ** 3)) )^(1/4) / ((price0 ** 2) + (price1 ** 2));
-        price0 *= 1e18 / (10 ** priceDecimals); //convert to 18 dec
-        price1 *= 1e18 / (10 ** priceDecimals);
-        uint256 a = FixedPointMathLib.rpow(price0, 3, 1e18); //keep same decimals as chainlink
-        uint256 b = FixedPointMathLib.rpow(price1, 3, 1e18);
-        uint256 c = FixedPointMathLib.rpow(price0, 2, 1e18);
-        uint256 d = FixedPointMathLib.rpow(price1, 2, 1e18);
-
-        uint256 p0 = k * FixedPointMathLib.mulWadDown(a, b); //2*18 decimals
-
-        uint256 fair = p0 / (c + d); // number of decimals is 18
-
-        // each sqrt divides the num decimals by 2. So need to replenish the decimals midway through with another 1e18
-        uint256 frth_fair = FixedPointMathLib.sqrt(
-            FixedPointMathLib.sqrt(fair * 1e18) * 1e18
-        ); // number of decimals is 18
-
-        return 2 * ((frth_fair * (10 ** priceDecimals)) / total_supply); // converts to chainlink decimals
-    }
-
-    function getK(uint256 x, uint256 y) internal pure returns (uint256) {
-        //x, n, scalar
-        uint256 x_cubed = FixedPointMathLib.rpow(x, 3, 1e18);
-        uint256 newX = FixedPointMathLib.mulWadDown(x_cubed, y);
-        uint256 y_cubed = FixedPointMathLib.rpow(y, 3, 1e18);
-        uint256 newY = FixedPointMathLib.mulWadDown(y_cubed, x);
-
-        return newX + newY; //18 decimals
     }
 }
