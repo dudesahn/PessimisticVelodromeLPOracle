@@ -112,11 +112,6 @@ def oracle(PessimisticVelodromeLPOracle, gov, use_three_days, use_adjusted_price
     token = "0x4200000000000000000000000000000000000006"
     oracle.setFeed(token, feed, 864000, {"from": gov})
 
-    # LDO
-    feed = "0x221618871470f78D8a3391d35B77dFb3C0fbc383"
-    token = "0xFdb794692724153d1488CcdBE0C56c252596735F"
-    oracle.setFeed(token, feed, 864000, {"from": gov})
-
     # LUSD
     feed = "0x9dfc79Aaeb5bb0f96C6e9402671981CdFc424052"
     token = "0xc40F949F8a4e094D1b49a23ea9241D289B7b2819"
@@ -160,16 +155,6 @@ def oracle(PessimisticVelodromeLPOracle, gov, use_three_days, use_adjusted_price
     # DAI
     feed = "0x8dba75e83da73cc766a7e5a0ee71f656bab470d6"
     token = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
-    oracle.setFeed(token, feed, 864000, {"from": gov})
-
-    # sUSD
-    feed = "0x7f99817d87bad03ea21e05112ca799d715730efe"
-    token = "0x8c6f28f2F1A3C87F0f938b96d27520d9751ec8d9"
-    oracle.setFeed(token, feed, 864000, {"from": gov})
-
-    # PERP
-    feed = "0xa12cddd8e986af9288ab31e58c60e65f2987fb13"
-    token = "0x9e1028F5F1D5eDE59748FFceE5532509976840E0"
     oracle.setFeed(token, feed, 864000, {"from": gov})
 
     # just run it again
