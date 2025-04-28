@@ -40,19 +40,19 @@ contract PessimisticVelodromeLPOracle {
 
     /* ========== STATE VARIABLES ========== */
 
-    /// @notice Daily low price stored per token.
-    mapping(address => mapping(uint256 => uint256)) public dailyLows; // token => day => price
+    /// @notice Daily low price.
+    mapping(uint256 => uint256) public dailyLows; // day => price
 
-    /// @notice Number of times a token's price was checked on a given day.
-    mapping(address => mapping(uint256 => uint256)) public dailyUpdates; // token => day => number of updates
+    /// @notice Number of times our token's price was checked on a given day.
+    mapping(uint256 => uint256) public dailyUpdates; // day => number of updates
 
     /// @notice A hard upper bound on our LP token price. This puts a cap on bad debt from oracle errors in a market.
     /// @dev May only be updated by operator.
-    mapping(address => uint256) public upperPriceBound;
+    uint256 public upperPriceBound;
 
     /// @notice A hard lower bound on our LP token price. This helps prevent liquidations from artificially low prices.
     /// @dev May only be updated by operator.
-    mapping(address => uint256) public lowerPriceBound;
+    uint256 public lowerPriceBound;
 
     /// @notice Whether we use our pessimistic pricing or not, along with our upper and lower price bounds.
     /// @dev May only be updated by operator.
@@ -67,13 +67,13 @@ contract PessimisticVelodromeLPOracle {
     /// @dev May only be updated by operator.
     bool public useChainlinkOnly = false;
 
-    /// @notice Address of the Chainlink price feed for a given underlying token.
+    /// @notice Address of the Chainlink price feed.
     /// @dev May only be updated by operator.
-    mapping(address => FeedInfo) public feeds;
+    FeedInfo public feed;
 
     /// @notice Custom number of periods our TWAP price should cover.
     /// @dev May only be updated by operator, default is 4 (2 hours).
-    mapping(address => uint256) public pointsOverride;
+    uint256 public pointsOverride;
 
     /// @notice Chainlink feed to check that Optimism's sequencer is online.
     /// @dev This prevents transactions sent while the sequencer is down from being executed when it comes back online.
@@ -450,14 +450,14 @@ contract PessimisticVelodromeLPOracle {
         } else {
             uint256 k = FixedPointMathLib.sqrt(reserve0 * reserve1); // xy = k, p0r0' = p1r1', this is in 1e18
             uint256 p = FixedPointMathLib.sqrt(price0 * 1e16 * price1); // boost this to 1e16 to give us more precision
-
+            
             // we want k and total supply to have same number of decimals so price has decimals of chainlink oracle
             fairReservesPricing = (2 * p * k) / (1e8 * pool.totalSupply());
         }
     }
 
-    //solves for cases where curve is x^3 * y + y^3 * x = k
-    //fair reserves math formula author: @ksyao2002
+    // solves for cases where curve is x^3 * y + y^3 * x = k
+    // fair reserves math formula author: @ksyao2002
     function _calculate_stable_lp_token_price(
         uint256 total_supply,
         uint256 price0,
@@ -467,15 +467,15 @@ contract PessimisticVelodromeLPOracle {
         uint256 priceDecimals
     ) internal pure returns (uint256) {
         uint256 k = _getK(reserve0, reserve1);
-        //fair_reserves = ( (k * (price0 ** 3) * (price1 ** 3)) )^(1/4) / ((price0 ** 2) + (price1 ** 2));
-        price0 *= 1e18 / (10 ** priceDecimals); //convert to 18 dec
+        // fair_reserves = ( (k * (price0 ** 3) * (price1 ** 3)) )^(1/4) / ((price0 ** 2) + (price1 ** 2));
+        price0 *= 1e18 / (10 ** priceDecimals); // convert to 18 dec
         price1 *= 1e18 / (10 ** priceDecimals);
-        uint256 a = FixedPointMathLib.rpow(price0, 3, 1e18); //keep same decimals as chainlink
+        uint256 a = FixedPointMathLib.rpow(price0, 3, 1e18); // keep same decimals as chainlink
         uint256 b = FixedPointMathLib.rpow(price1, 3, 1e18);
         uint256 c = FixedPointMathLib.rpow(price0, 2, 1e18);
         uint256 d = FixedPointMathLib.rpow(price1, 2, 1e18);
 
-        uint256 p0 = k * FixedPointMathLib.mulWadDown(a, b); //2*18 decimals
+        uint256 p0 = k * FixedPointMathLib.mulWadDown(a, b); // 2*18 decimals
 
         uint256 fair = p0 / (c + d); // number of decimals is 18
 
@@ -494,7 +494,7 @@ contract PessimisticVelodromeLPOracle {
         uint256 y_cubed = FixedPointMathLib.rpow(y, 3, 1e18);
         uint256 newY = FixedPointMathLib.mulWadDown(y_cubed, x);
 
-        return newX + newY; //18 decimals
+        return newX + newY; // 18 decimals
     }
 
     /* ========== SETTERS ========== */
