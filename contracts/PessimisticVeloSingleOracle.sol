@@ -31,11 +31,6 @@ import {FixedPointMathLib} from "./FixedPointMathLib.sol";
  */
 
 contract PessimisticVeloSingleOracle is Ownable2Step {
-    struct FeedInfo {
-        address feedAddress;
-        uint96 heartbeat;
-    }
-
     /* ========== STATE VARIABLES ========== */
 
     /// @notice Daily low price.
