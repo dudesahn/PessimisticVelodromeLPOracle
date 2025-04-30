@@ -1,5 +1,5 @@
 import pytest
-from brownie import accounts, Contract, chain, interface
+from brownie import accounts, Contract, chain, interface, ZERO_ADDRESS
 import time
 
 # NOTE: Make sure to run these tests in ganache (with an older version of brownie, like 1.19.2) as anvil crashes out
@@ -23,6 +23,32 @@ def test_normal_oracle(
 
     price = oracle.getCurrentPoolPrice(weth_reth_pool)
     print("rETH/WETH LP Price:", "${:,.2f}".format(price / 1e8), "\n")
+
+    # alETH-WETH, one chainlink
+    pool = "0xa1055762336F92b4B8d2eDC032A0Ce45ead6280a"
+    price1, price2 = oracle.getTokenPrices(pool)
+    print(
+        "alETH, WETH Prices:",
+        "${:,.8f}".format(price1 / 1e8),
+        ",",
+        "${:,.8f}".format(price2 / 1e8),
+    )
+
+    price = oracle.getCurrentPoolPrice(pool)
+    print("alETH-WETH LP Price:", "${:,.2f}".format(price / 1e8), "\n")
+
+    # tBTC-WETH, one chainlink
+    weth_tbtc_pool = "0xadBB23Bcc3C1B9810491897cb0690Cf645B858b1"
+    price1, price2 = oracle.getTokenPrices(weth_tbtc_pool)
+    print(
+        "WETH, tBTC Prices:",
+        "${:,.8f}".format(price1 / 1e8),
+        ",",
+        "${:,.8f}".format(price2 / 1e8),
+    )
+
+    price = oracle.getCurrentPoolPrice(weth_tbtc_pool)
+    print("tBTC/WETH LP Price:", "${:,.2f}".format(price / 1e8), "\n")
 
     # SNX-USDC, both chainlink
     pool = "0x71d53B5B7141E1ec9A3Fc9Cc48b4766102d14A4A"
@@ -114,6 +140,55 @@ def test_normal_oracle(
 
     price = oracle.getCurrentPoolPrice(pool)
     print("WETH-OP LP Price:", "${:,.2f}".format(price / 1e8), "\n")
+
+
+# test under normal circumstances
+def test_normal_oracle_single(
+    gov,
+    PessimisticVeloSingleOracle,
+):
+
+    # set our chainlink feeds, 10 day heartbeat
+    # WETH
+    feed0 = "0x13e3Ee699D1909E989722E753853AE30b17e08c5"
+    feed1 = ZERO_ADDRESS
+    heartbeat0 = 864000
+    heartbeat1 = 864000
+    both_chainlink = False
+    twap_points = 400
+    use_pessimistic = False
+
+    # rETH-WETH, one chainlink
+    pool = "0x7e0F65FAB1524dA9E2E5711D160541cf1199912E"
+
+    oracle = gov.deploy(
+        PessimisticVeloSingleOracle,
+        pool,
+        both_chainlink,
+        feed0,
+        feed1,
+        heartbeat0,
+        heartbeat1,
+        twap_points,
+        gov,
+    )
+
+    price1, price2 = oracle.getTokenPrices()
+    print(
+        "WETH, rETH Prices:",
+        "${:,.8f}".format(price1 / 1e8),
+        ",",
+        "${:,.8f}".format(price2 / 1e8),
+    )
+
+    price = oracle.getCurrentPoolPrice(use_pessimistic)
+    print("rETH/WETH LP Price:", "${:,.2f}".format(price / 1e8), "\n")
+
+    # update some prices
+    oracle.setOperator(gov, True, {"from": gov})
+    oracle.updatePrice({"from": gov})
+    price = oracle.getCurrentPoolPrice(True)
+    print("rETH/WETH LP Price:", "${:,.2f}".format(price / 1e8), "\n")
 
 
 def test_oracle_price_manipulation(

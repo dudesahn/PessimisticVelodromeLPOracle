@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGLP-3.0
 pragma solidity ^0.8.19;
 
-import {IERC20} from "@openzeppelin/contracts@4.9.3/token/ERC20/IERC20.sol";
+import {IERC20} from "@openzeppelin/contracts@5.3.0/token/ERC20/IERC20.sol";
 
 interface IVeloPool is IERC20 {
     function quote(
