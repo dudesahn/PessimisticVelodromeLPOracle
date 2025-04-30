@@ -8,6 +8,7 @@ autofetch_sources: True
 
 # require OpenZepplin Contracts
 dependencies:
+  - OpenZeppelin/openzeppelin-contracts@5.3.0
   - OpenZeppelin/openzeppelin-contracts@4.9.3
 
 # path remapping to support imports from GitHub/NPM
@@ -15,6 +16,7 @@ compiler:
   solc:
     version:
     remappings:
+      - "@openzeppelin/contracts@5.3.0=OpenZeppelin/openzeppelin-contracts@5.3.0/contracts"
       - "@openzeppelin/contracts@4.9.3=OpenZeppelin/openzeppelin-contracts@4.9.3/contracts"
 
 reports:
@@ -25,3 +27,5 @@ reports:
     - Address
     - BaseStrategy
     - SafeERC20
+    - IERC4626
+    - Ownable2Step
