@@ -46,7 +46,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
 
     /// @notice Custom number of periods our TWAP price should cover.
     /// @dev Set on deployment, default is 4 (2 hours).
-    uint256 public immutable pointsOverride;
+    uint256 public immutable points;
 
     /// @notice Chainlink feed to check that Optimism's sequencer is online.
     /// @dev This prevents transactions sent while the sequencer is down from being executed when it comes back online.
@@ -111,7 +111,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
         // The default number of periods (points) we look back in time for TWAP pricing.
         // Each period is 30 mins, so minimum is 2 hours.
         require(_twapPoints > 3, "!points");
-        pointsOverride = _twapPoints;
+        points = _twapPoints;
 
         // set the pool in the constructor, pull token0 and token1 from that
         pool = _pool;
@@ -300,19 +300,19 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     /**
      * @notice Returns the TWAP price for a token relative to the other token in its pool.
      * @dev Note that we can customize the length of points but we default to 4 points (2 hours). Additionally, if a
-     *  pool is very small, it may not be priced as accurately since we swap in 1 full token to price.
+     *  pool is very small, it may not be priced as accurately if we attempt to use 1 full token to price.
      * @param _token The address of the token to get the price of, and that we are swapping in.
-     * @param _oneToken One of the token we are swapping in.
-     * @return twapPrice Amount of the other token we get when swapping in _oneToken looking back over our TWAP period.
+     * @param _tokenAmount Amount of the token we are swapping in.
+     * @return twapPrice Amount of other token we get when swapping in _tokenAmount looking back over our TWAP period.
      */
     function getTwapPrice(
         address _token,
-        uint256 _oneToken
+        uint256 _tokenAmount
     ) public view returns (uint256 twapPrice) {
         IVeloPool poolContract = IVeloPool(pool);
 
         // swapping one of our token gets us this many otherToken, returned in decimals of the other token
-        twapPrice = poolContract.quote(_token, _oneToken, pointsOverride);
+        twapPrice = poolContract.quote(_token, _tokenAmount, points);
     }
 
     // by default we use 0.01 tokens in this function to more accurately price small pools
