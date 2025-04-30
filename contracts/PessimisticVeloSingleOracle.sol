@@ -116,15 +116,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
         // set the pool in the constructor, pull token0 and token1 from that
         pool = _pool;
         IVeloPool poolContract = IVeloPool(_pool);
-        (
-            uint256 decimals0, // note that this will be "1e18"", not "18"
-            uint256 decimals1,
-            ,
-            ,
-            ,
-            address _token0,
-            address _token1
-        ) = poolContract.metadata();
+        (, , , , , address _token0, address _token1) = poolContract.metadata();
 
         // set our feed addresses and heartbeats (typical is 86400)
         if (_token0Feed != address(0)) {
@@ -323,6 +315,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
         twapPrice = poolContract.quote(_token, _oneToken, pointsOverride);
     }
 
+    // by default we use 0.01 tokens in this function to more accurately price small pools
     function getTokenPrices()
         public
         view
@@ -347,14 +340,16 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
             } else {
                 // get twap price for token1. this is the amount of token1 we would get from 1 token0
                 price1 =
-                    (decimals1 * decimals1) /
-                    getTwapPrice(_token0, decimals0); // returned in decimals1
+                    ((decimals1 * decimals1) / 100) /
+                    getTwapPrice(_token0, decimals0 / 100); // returned in decimals1
                 price1 = (price0 * price1) / (decimals1);
             }
         } else if (token1Feed != address(0)) {
             price1 = getChainlinkPrice(1); // returned with 8 decimals
             // get twap price for token0
-            price0 = (decimals0 * decimals0) / getTwapPrice(_token1, decimals1); // returned in decimals0
+            price0 =
+                ((decimals0 * decimals0) / 100) /
+                getTwapPrice(_token1, decimals1 / 100); // returned in decimals0
             price0 = (price0 * price1) / (decimals0);
         }
     }

@@ -155,7 +155,7 @@ def test_normal_oracle_single(
     heartbeat0 = 864000
     heartbeat1 = 864000
     both_chainlink = False
-    twap_points = 400
+    twap_points = 4
     use_pessimistic = False
 
     # rETH-WETH, one chainlink
