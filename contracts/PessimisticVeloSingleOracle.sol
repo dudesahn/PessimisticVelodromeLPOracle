@@ -110,7 +110,9 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     ) Ownable(_owner) {
         // The default number of periods (points) we look back in time for TWAP pricing.
         // Each period is 30 mins, so minimum is 2 hours.
-        require(_twapPoints > 3, "!points");
+        if (_twapPoints < 4) {
+            revert TooFewTwapPoints();
+        }
         points = _twapPoints;
 
         // set the pool in the constructor, pull token0 and token1 from that
@@ -118,42 +120,58 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
         IVeloPool poolContract = IVeloPool(_pool);
         (, , , , , address _token0, address _token1) = poolContract.metadata();
 
+        if (poolContract.decimals() != 18) {
+            revert NotLpDecimals();
+        }
+
         // set our feed addresses and heartbeats (typical is 86400)
         if (_token0Feed != address(0)) {
             token0Feed = _token0Feed;
             token0Heartbeat = _token0Heartbeat;
             // we always expect 8 decimals for USD pricing
             if (IChainLinkOracle(_token0Feed).decimals() != 8) {
-                revert("Must be 8 decimals");
+                revert NotChainlinkDecimals();
             }
             if (_token1Feed != address(0)) {
                 token1Feed = _token1Feed;
                 token1Heartbeat = _token1Heartbeat;
                 if (IChainLinkOracle(_token1Feed).decimals() != 8) {
-                    revert("Must be 8 decimals");
+                    revert NotChainlinkDecimals();
                 }
             } else {
                 // revert if we are supposed to only use chainlink
                 if (_useChainlinkOnly) {
-                    revert("Only Chainlink feeds supported");
+                    revert BothMustBeChainlink();
                 }
             }
         } else if (token1Feed != address(0)) {
             token1Feed = _token1Feed;
             token1Heartbeat = _token1Heartbeat;
             if (IChainLinkOracle(_token1Feed).decimals() != 8) {
-                revert("Must be 8 decimals");
+                revert NotChainlinkDecimals();
             }
         } else {
-            revert("At least one token must have CL oracle");
+            revert NoChainlinkOracle();
         }
     }
 
-    /* ========== EVENTS/MODIFIERS ========== */
+    /* ========== EVENTS/MODIFIERS/ERRORS ========== */
 
     event RecordDailyLow(uint256 price);
     event OperatorUpdated(address indexed account, bool canEndorse);
     event SetUseThreeDayLow(bool useThreeDayWindow);
+
+    error TooFewTwapPoints();
+    error NotLpDecimals();
+    error NotChainlinkDecimals();
+    error BothMustBeChainlink();
+    error NoChainlinkOracle();
+    error WrongVaultForPool();
+    error PriceStale();
+    error PriceInvalid();
+    error SequencerDown();
+    error NotOperator();
+    error NoRecentPriceUpdates();
 
     /* ========== VIEW FUNCTIONS ========== */
 
@@ -194,7 +212,9 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     ) external view returns (uint256) {
         IERC4626 vault = IERC4626(_vault);
         address _pool = vault.asset();
-        require(_pool == pool, "!pool");
+        if (_pool == pool) {
+            revert WrongVaultForPool();
+        }
 
         if (_usePessimisticPricing) {
             return
@@ -220,7 +240,9 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     ) external view returns (uint256) {
         IYearnVaultV2 vault = IYearnVaultV2(_vault);
         address _pool = vault.token();
-        require(_pool == pool, "!pool");
+        if (_pool == pool) {
+            revert WrongVaultForPool();
+        }
 
         if (_usePessimisticPricing) {
             return
@@ -276,12 +298,12 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
 
         // if a price is older than our preset heartbeat, we're in trouble
         if (block.timestamp - updatedAt > heartbeat) {
-            revert("Price is stale");
+            revert PriceStale();
         }
 
         // you mean we can't have negative prices?
         if (price <= 0) {
-            revert("Invalid feed price");
+            revert PriceInvalid();
         }
 
         // make sure the sequencer is up
@@ -289,10 +311,10 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
         (, int256 sequencerAnswer, , , ) = sequencerUptimeFeed
             .latestRoundData();
 
-        // Answer == 0: Sequencer is up
-        // Answer == 1: Sequencer is down
+        // Answer == 0: L2 Sequencer is up
+        // Answer == 1: L2 Sequencer is down
         if (sequencerAnswer == 1) {
-            revert("L2 sequencer down");
+            revert SequencerDown();
         }
         currentPrice = uint256(price);
     }
@@ -361,7 +383,9 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     // @param _pool LP token to update pricing for.
     function updatePrice() external {
         // don't let just anyone update deez prices
-        require(operator[msg.sender], "unauthorized");
+        if (operator[msg.sender] != true) {
+            revert NotOperator();
+        }
         _updatePrice();
     }
 
@@ -396,7 +420,9 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
         // if we haven't updated yet today, pretend it's yesterday instead
         if (dailyUpdates[day] == 0) {
             day -= 1;
-            require(dailyUpdates[day] > 0, "!updates");
+            if (dailyUpdates[day] == 0) {
+                revert NoRecentPriceUpdates();
+            }
         }
 
         // get today's low
@@ -426,9 +452,6 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     ) internal view returns (uint256 fairReservesPricing) {
         // get what we need to calculate our reserves and pricing
         IVeloPool poolContract = IVeloPool(_pool);
-        if (poolContract.decimals() != 18) {
-            revert("Lp token must have 18 decimals");
-        }
         (
             uint256 decimals0, // note that this will be "1e18"", not "18"
             uint256 decimals1,
