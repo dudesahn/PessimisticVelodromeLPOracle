@@ -45,7 +45,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     bool public useThreeDayLow = false;
 
     /// @notice Custom number of periods our TWAP price should cover.
-    /// @dev Set on deployment, default is 4 (2 hours).
+    /// @dev Set on deployment, minimum is 4 (2 hours).
     uint256 public immutable points;
 
     /// @notice Chainlink feed to check that Optimism's sequencer is online.
@@ -60,8 +60,15 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     /// @notice Address of the pool for this oracle.
     address public immutable pool;
 
+    /// @notice Whether the pool is stable (true) or volatile (false).
+    bool public immutable stable;
+
     /// @notice Address of the pool's token0.
     address public immutable token0;
+
+    /// @notice Decimals of the pool's token0.
+    /// @dev Note that this will be "1e18"", not "18"
+    uint256 public immutable decimals0;
 
     /// @notice Address of the Chainlink price feed for token0.
     address public immutable token0Feed;
@@ -71,6 +78,10 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
 
     /// @notice Address of the pool's token1.
     address public immutable token1;
+
+    /// @notice Decimals of the pool's token1.
+    /// @dev Note that this will be "1e18"", not "18"
+    uint256 public immutable decimals1;
 
     /// @notice Address of the Chainlink price feed for token1.
     address public immutable token1Feed;
@@ -118,7 +129,20 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
         // set the pool in the constructor, pull token0 and token1 from that
         pool = _pool;
         IVeloPool poolContract = IVeloPool(_pool);
-        (, , , , , address _token0, address _token1) = poolContract.metadata();
+        (
+            uint256 _decimals0,
+            uint256 _decimals1,
+            ,
+            ,
+            bool _stable,
+            address _token0,
+            address _token1
+        ) = poolContract.metadata();
+        decimals0 = _decimals0;
+        decimals1 = _decimals1;
+        token0 = _token0;
+        token1 = _token1;
+        stable = _stable;
 
         if (poolContract.decimals() != 18) {
             revert NotLpDecimals();
@@ -343,17 +367,6 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
         view
         returns (uint256 price0, uint256 price1)
     {
-        IVeloPool poolContract = IVeloPool(pool);
-        (
-            uint256 decimals0, // note that this will be "1e18"", not "18"
-            uint256 decimals1,
-            ,
-            ,
-            ,
-            address _token0,
-            address _token1
-        ) = poolContract.metadata();
-
         // check if we have chainlink feeds or TWAP for each token
         if (token0Feed != address(0)) {
             price0 = getChainlinkPrice(0); // returned with 8 decimals
@@ -363,7 +376,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
                 // get twap price for token1. this is the amount of token1 we would get from 1 token0
                 price1 =
                     ((decimals1 * decimals1) / 100) /
-                    getTwapPrice(_token0, decimals0 / 100); // returned in decimals1
+                    getTwapPrice(token0, decimals0 / 100); // returned in decimals1
                 price1 = (price0 * price1) / (decimals1);
             }
         } else if (token1Feed != address(0)) {
@@ -371,7 +384,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
             // get twap price for token0
             price0 =
                 ((decimals0 * decimals0) / 100) /
-                getTwapPrice(_token1, decimals1 / 100); // returned in decimals0
+                getTwapPrice(token1, decimals1 / 100); // returned in decimals0
             price0 = (price0 * price1) / (decimals0);
         }
     }
@@ -452,15 +465,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     ) internal view returns (uint256 fairReservesPricing) {
         // get what we need to calculate our reserves and pricing
         IVeloPool poolContract = IVeloPool(_pool);
-        (
-            uint256 decimals0, // note that this will be "1e18"", not "18"
-            uint256 decimals1,
-            uint256 reserve0,
-            uint256 reserve1,
-            ,
-            ,
-
-        ) = poolContract.metadata();
+        (uint256 reserve0, uint256 reserve1, ) = poolContract.getReserves();
 
         // make sure our reserves are normalized to 18 decimals (looking at you, USDC)
         reserve0 = (reserve0 * DECIMALS) / decimals0;
@@ -469,7 +474,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
         // pull our prices
         (uint256 price0, uint256 price1) = getTokenPrices();
 
-        if (poolContract.stable()) {
+        if (stable) {
             fairReservesPricing = _calculate_stable_lp_token_price(
                 poolContract.totalSupply(),
                 price0,
