@@ -194,6 +194,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     error PriceStale();
     error PriceInvalid();
     error SequencerDown();
+    error GracePeriodNotOver();
     error NotOperator();
     error NoRecentPriceUpdates();
 
@@ -332,14 +333,27 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
 
         // make sure the sequencer is up
         // uint80 roundID int256 sequencerAnswer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound
-        (, int256 sequencerAnswer, , , ) = sequencerUptimeFeed
-            .latestRoundData();
+        (
+            ,
+            int256 sequencerAnswer,
+            uint256 startedAt,
+            ,
+            ,
+
+        ) = sequencerUptimeFeed.latestRoundData();
 
         // Answer == 0: L2 Sequencer is up
         // Answer == 1: L2 Sequencer is down
         if (sequencerAnswer == 1) {
             revert SequencerDown();
         }
+
+        // Make sure a grace period of one hour has passed after the sequencer is back up.
+        uint256 timeSinceUp = block.timestamp - startedAt;
+        if (timeSinceUp < 3600) {
+            revert GracePeriodNotOver();
+        }
+
         currentPrice = uint256(price);
     }
 
