@@ -373,19 +373,17 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
             if (token1Feed != address(0)) {
                 price1 = getChainlinkPrice(1); // returned with 8 decimals
             } else {
-                // get twap price for token1. this is the amount of token1 we would get from 1 token0
+                // get twap price for token1. this is the amount of token1 we would get from 0.01 token0
                 price1 =
-                    ((decimals1 * decimals1) / 100) /
-                    getTwapPrice(token0, decimals0 / 100); // returned in decimals1
-                price1 = (price0 * price1) / (decimals1);
+                    (price0 * decimals1) /
+                    (getTwapPrice(token0, decimals0 / 100) * 100);
             }
         } else if (token1Feed != address(0)) {
             price1 = getChainlinkPrice(1); // returned with 8 decimals
-            // get twap price for token0
+            // get twap price for token0. this is the amount of token0 we would get from 0.01 token1
             price0 =
-                ((decimals0 * decimals0) / 100) /
-                getTwapPrice(token1, decimals1 / 100); // returned in decimals0
-            price0 = (price0 * price1) / (decimals0);
+                (price1 * decimals0) /
+                (getTwapPrice(token1, decimals1 / 100) * 100);
         }
     }
 

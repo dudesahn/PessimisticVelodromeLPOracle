@@ -5,6 +5,7 @@ import time
 # NOTE: Make sure to run these tests in ganache (with an older version of brownie, like 1.19.2) as anvil crashes out
 #  when simulating >75 or so transactions in a fork
 
+
 # test under normal circumstances
 def test_normal_oracle(
     gov,
@@ -189,6 +190,38 @@ def test_normal_oracle_single(
     oracle.updatePrice({"from": gov})
     price = oracle.getCurrentPoolPrice(True)
     print("rETH/WETH LP Price:", "${:,.2f}".format(price / 1e8), "\n")
+
+    # tBTC-WETH, one chainlink
+    pool = "0xadBB23Bcc3C1B9810491897cb0690Cf645B858b1"
+
+    oracle = gov.deploy(
+        PessimisticVeloSingleOracle,
+        pool,
+        both_chainlink,
+        feed0,
+        feed1,
+        heartbeat0,
+        heartbeat1,
+        twap_points,
+        gov,
+    )
+
+    price1, price2 = oracle.getTokenPrices()
+    print(
+        "WETH, tBTC Prices:",
+        "${:,.8f}".format(price1 / 1e8),
+        ",",
+        "${:,.8f}".format(price2 / 1e8),
+    )
+
+    price = oracle.getCurrentPoolPrice(use_pessimistic)
+    print("tBTC/WETH LP Price:", "${:,.2f}".format(price / 1e8), "\n")
+
+    # update some prices
+    oracle.setOperator(gov, True, {"from": gov})
+    oracle.updatePrice({"from": gov})
+    price = oracle.getCurrentPoolPrice(True)
+    print("tBTC/WETH LP Price:", "${:,.2f}".format(price / 1e8), "\n")
 
 
 def test_oracle_price_manipulation(
