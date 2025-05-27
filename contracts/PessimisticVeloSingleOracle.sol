@@ -168,7 +168,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
                     revert BothMustBeChainlink();
                 }
             }
-        } else if (token1Feed != address(0)) {
+        } else if (_token1Feed != address(0)) {
             token1Feed = _token1Feed;
             token1Heartbeat = _token1Heartbeat;
             if (IChainLinkOracle(_token1Feed).decimals() != 8) {
