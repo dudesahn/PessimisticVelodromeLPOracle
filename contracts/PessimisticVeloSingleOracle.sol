@@ -89,9 +89,6 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     /// @notice Heartbeat of the Chainlink price feed for token1.
     uint96 public immutable token1Heartbeat;
 
-    /// @notice Whether we only use Chainlink feeds or allow TWAP for one of the two assets.
-    bool public immutable useChainlinkOnly;
-
     /// @notice Used to track the deployed version of this contract.
     string public constant apiVersion = "3.0.0a";
 
@@ -101,7 +98,6 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     /* ========== CONSTRUCTOR ========== */
     /**
      * @param _pool Address of the Velodrome pool this oracle is pricing.
-     * @param _useChainlinkOnly Whether to require that we only price using Chainlink feeds.
      * @param _token0Feed The Chainlink feed for token0.
      * @param _token1Feed The Chainlink feed for token1.
      * @param _token0Heartbeat The heartbeat for our token0 feed (maximum time allowed before refresh).
@@ -111,7 +107,6 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
      */
     constructor(
         address _pool,
-        bool _useChainlinkOnly,
         address _token0Feed,
         address _token1Feed,
         uint96 _token0Heartbeat,
@@ -148,35 +143,29 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
             revert NotLpDecimals();
         }
 
-        // set our feed addresses and heartbeats (typical is 86400)
-        if (_token0Feed != address(0)) {
-            token0Feed = _token0Feed;
-            token0Heartbeat = _token0Heartbeat;
-            // we always expect 8 decimals for USD pricing
-            if (IChainLinkOracle(_token0Feed).decimals() != 8) {
-                revert NotChainlinkDecimals();
-            }
-            if (_token1Feed != address(0)) {
-                token1Feed = _token1Feed;
-                token1Heartbeat = _token1Heartbeat;
-                if (IChainLinkOracle(_token1Feed).decimals() != 8) {
-                    revert NotChainlinkDecimals();
-                }
-            } else {
-                // revert if we are supposed to only use chainlink
-                if (_useChainlinkOnly) {
-                    revert BothMustBeChainlink();
-                }
-            }
-        } else if (_token1Feed != address(0)) {
-            token1Feed = _token1Feed;
-            token1Heartbeat = _token1Heartbeat;
-            if (IChainLinkOracle(_token1Feed).decimals() != 8) {
-                revert NotChainlinkDecimals();
-            }
-        } else {
+        if (_token0Feed == address(0) && _token1Feed == address(0)) {
             revert NoChainlinkOracle();
         }
+
+        if (
+            _token0Feed != address(0) &&
+            IChainLinkOracle(_token0Feed).decimals() != 8
+        ) {
+            revert NotChainlinkDecimals();
+        }
+
+        if (
+            _token1Feed != address(0) &&
+            IChainLinkOracle(_token1Feed).decimals() != 8
+        ) {
+            revert NotChainlinkDecimals();
+        }
+
+        // set our immutables
+        token0Feed = _token0Feed;
+        token0Heartbeat = _token0Heartbeat;
+        token1Feed = _token1Feed;
+        token1Heartbeat = _token1Heartbeat;
     }
 
     /* ========== EVENTS/MODIFIERS/ERRORS ========== */
@@ -187,9 +176,8 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
 
     error TooFewTwapPoints();
     error NotLpDecimals();
-    error NotChainlinkDecimals();
-    error BothMustBeChainlink();
     error NoChainlinkOracle();
+    error NotChainlinkDecimals();
     error WrongVaultForPool();
     error PriceStale();
     error PriceInvalid();

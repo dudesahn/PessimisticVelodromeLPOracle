@@ -165,7 +165,6 @@ def test_normal_oracle_single(
     oracle = gov.deploy(
         PessimisticVeloSingleOracle,
         pool,
-        both_chainlink,
         feed0,
         feed1,
         heartbeat0,
@@ -197,7 +196,6 @@ def test_normal_oracle_single(
     oracle = gov.deploy(
         PessimisticVeloSingleOracle,
         pool,
-        both_chainlink,
         feed0,
         feed1,
         heartbeat0,
