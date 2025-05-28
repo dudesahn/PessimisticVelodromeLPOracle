@@ -333,14 +333,8 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
 
         // make sure the sequencer is up
         // uint80 roundID int256 sequencerAnswer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound
-        (
-            ,
-            int256 sequencerAnswer,
-            uint256 startedAt,
-            ,
-            ,
-
-        ) = sequencerUptimeFeed.latestRoundData();
+        (, int256 sequencerAnswer, uint256 startedAt, , ) = sequencerUptimeFeed
+            .latestRoundData();
 
         // Answer == 0: L2 Sequencer is up
         // Answer == 1: L2 Sequencer is down
