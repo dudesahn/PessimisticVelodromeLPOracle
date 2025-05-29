@@ -10,6 +10,15 @@ interface IVeloPool is IERC20 {
         uint256 granularity
     ) external view returns (uint256);
 
+    function getReserves()
+        external
+        view
+        returns (
+            uint256 _reserve0,
+            uint256 _reserve1,
+            uint256 _blockTimestampLast
+        );
+
     function metadata()
         external
         view
@@ -26,4 +35,6 @@ interface IVeloPool is IERC20 {
     function decimals() external view returns (uint8);
 
     function stable() external view returns (bool);
+
+    function name() external view returns (string memory);
 }

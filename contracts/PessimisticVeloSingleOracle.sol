@@ -3,11 +3,11 @@ pragma solidity ^0.8.20;
 
 import {IERC4626} from "@openzeppelin/contracts@5.3.0/interfaces/IERC4626.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts@5.3.0/access/Ownable2Step.sol";
-import {IYearnVaultV2} from "./interfaces/IYearnVaultV2.sol";
-import {IVeloPool} from "./interfaces/IVeloPool.sol";
-import {IChainLinkOracle} from "./interfaces/IChainLinkOracle.sol";
-import {ShareValueHelper} from "./ShareValueHelper.sol";
-import {FixedPointMathLib} from "./FixedPointMathLib.sol";
+import {IYearnVaultV2} from "contracts/interfaces/IYearnVaultV2.sol";
+import {IVeloPool} from "contracts/interfaces/IVeloPool.sol";
+import {IChainLinkOracle} from "contracts/interfaces/IChainLinkOracle.sol";
+import {ShareValueHelper} from "contracts/ShareValueHelper.sol";
+import {FixedPointMathLib} from "contracts/FixedPointMathLib.sol";
 
 /**
  * @title Velodrome LP Pessimistic Single Oracle
@@ -45,7 +45,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     bool public useThreeDayLow = false;
 
     /// @notice Custom number of periods our TWAP price should cover.
-    /// @dev Set on deployment, default is 4 (2 hours).
+    /// @dev Set on deployment, minimum is 4 (2 hours).
     uint256 public immutable points;
 
     /// @notice Chainlink feed to check that Optimism's sequencer is online.
@@ -60,8 +60,15 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     /// @notice Address of the pool for this oracle.
     address public immutable pool;
 
+    /// @notice Whether the pool is stable (true) or volatile (false).
+    bool public immutable stable;
+
     /// @notice Address of the pool's token0.
     address public immutable token0;
+
+    /// @notice Decimals of the pool's token0.
+    /// @dev Note that this will be "1e18"", not "18"
+    uint256 public immutable decimals0;
 
     /// @notice Address of the Chainlink price feed for token0.
     address public immutable token0Feed;
@@ -72,14 +79,15 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     /// @notice Address of the pool's token1.
     address public immutable token1;
 
+    /// @notice Decimals of the pool's token1.
+    /// @dev Note that this will be "1e18"", not "18"
+    uint256 public immutable decimals1;
+
     /// @notice Address of the Chainlink price feed for token1.
     address public immutable token1Feed;
 
     /// @notice Heartbeat of the Chainlink price feed for token1.
     uint96 public immutable token1Heartbeat;
-
-    /// @notice Whether we only use Chainlink feeds or allow TWAP for one of the two assets.
-    bool public immutable useChainlinkOnly;
 
     /// @notice Used to track the deployed version of this contract.
     string public constant apiVersion = "3.0.0a";
@@ -89,8 +97,8 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
 
     /* ========== CONSTRUCTOR ========== */
     /**
+     * @dev Check Chainlink's documentation for heartbeat length of their various feeds.
      * @param _pool Address of the Velodrome pool this oracle is pricing.
-     * @param _useChainlinkOnly Whether to require that we only price using Chainlink feeds.
      * @param _token0Feed The Chainlink feed for token0.
      * @param _token1Feed The Chainlink feed for token1.
      * @param _token0Heartbeat The heartbeat for our token0 feed (maximum time allowed before refresh).
@@ -100,7 +108,6 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
      */
     constructor(
         address _pool,
-        bool _useChainlinkOnly,
         address _token0Feed,
         address _token1Feed,
         uint96 _token0Heartbeat,
@@ -110,52 +117,91 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     ) Ownable(_owner) {
         // The default number of periods (points) we look back in time for TWAP pricing.
         // Each period is 30 mins, so minimum is 2 hours.
-        require(_twapPoints > 3, "!points");
+        if (_twapPoints < 4) {
+            revert TooFewTwapPoints();
+        }
         points = _twapPoints;
+
+        // A heartbeat is the amount of time after which we consider a chainlink feed's price to be stale. For major
+        // assets like BTC and ETH, this value is 3600 (1 hour). For less actively traded assets, this can be as high as
+        // 86400 (1 day). Note that chainlink price feeds update based on price movement of an asset or heartbeat,
+        // whichever comes sooner.
+        if (_token0Heartbeat < 3600 || _token1Heartbeat < 3600) {
+            revert HeartbeatTooShort();
+        }
 
         // set the pool in the constructor, pull token0 and token1 from that
         pool = _pool;
         IVeloPool poolContract = IVeloPool(_pool);
-        (, , , , , address _token0, address _token1) = poolContract.metadata();
+        (
+            uint256 _decimals0,
+            uint256 _decimals1,
+            ,
+            ,
+            bool _stable,
+            address _token0,
+            address _token1
+        ) = poolContract.metadata();
+        decimals0 = _decimals0;
+        decimals1 = _decimals1;
+        token0 = _token0;
+        token1 = _token1;
+        stable = _stable;
 
-        // set our feed addresses and heartbeats (typical is 86400)
-        if (_token0Feed != address(0)) {
-            token0Feed = _token0Feed;
-            token0Heartbeat = _token0Heartbeat;
-            // we always expect 8 decimals for USD pricing
-            if (IChainLinkOracle(_token0Feed).decimals() != 8) {
-                revert("Must be 8 decimals");
-            }
-            if (_token1Feed != address(0)) {
-                token1Feed = _token1Feed;
-                token1Heartbeat = _token1Heartbeat;
-                if (IChainLinkOracle(_token1Feed).decimals() != 8) {
-                    revert("Must be 8 decimals");
-                }
-            } else {
-                // revert if we are supposed to only use chainlink
-                if (_useChainlinkOnly) {
-                    revert("Only Chainlink feeds supported");
-                }
-            }
-        } else if (token1Feed != address(0)) {
-            token1Feed = _token1Feed;
-            token1Heartbeat = _token1Heartbeat;
-            if (IChainLinkOracle(_token1Feed).decimals() != 8) {
-                revert("Must be 8 decimals");
-            }
-        } else {
-            revert("At least one token must have CL oracle");
+        if (poolContract.decimals() != 18) {
+            revert NotLpDecimals();
         }
+
+        if (_token0Feed == address(0) && _token1Feed == address(0)) {
+            revert NoChainlinkOracle();
+        }
+
+        if (
+            _token0Feed != address(0) &&
+            IChainLinkOracle(_token0Feed).decimals() != 8
+        ) {
+            revert NotChainlinkDecimals();
+        }
+
+        if (
+            _token1Feed != address(0) &&
+            IChainLinkOracle(_token1Feed).decimals() != 8
+        ) {
+            revert NotChainlinkDecimals();
+        }
+
+        // set our feeds and heartbeat
+        token0Feed = _token0Feed;
+        token1Feed = _token1Feed;
+        token0Heartbeat = _token0Heartbeat;
+        token1Heartbeat = _token1Heartbeat;
     }
 
-    /* ========== EVENTS/MODIFIERS ========== */
+    /* ========== EVENTS/MODIFIERS/ERRORS ========== */
 
     event RecordDailyLow(uint256 price);
     event OperatorUpdated(address indexed account, bool canEndorse);
     event SetUseThreeDayLow(bool useThreeDayWindow);
 
+    error TooFewTwapPoints();
+    error HeartbeatTooShort();
+    error NotLpDecimals();
+    error NoChainlinkOracle();
+    error NotChainlinkDecimals();
+    error WrongVaultForPool();
+    error PriceStale();
+    error PriceInvalid();
+    error SequencerDown();
+    error GracePeriodNotOver();
+    error NotOperator();
+    error NoRecentPriceUpdates();
+
     /* ========== VIEW FUNCTIONS ========== */
+
+    /// @notice Name of the pool this oracle is pricing
+    function poolName() public view returns (string memory) {
+        return IVeloPool(pool).name();
+    }
 
     /**
      * @notice Check the last time a token's Chainlink price was updated.
@@ -194,7 +240,9 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     ) external view returns (uint256) {
         IERC4626 vault = IERC4626(_vault);
         address _pool = vault.asset();
-        require(_pool == pool, "!pool");
+        if (_pool != pool) {
+            revert WrongVaultForPool();
+        }
 
         if (_usePessimisticPricing) {
             return
@@ -220,7 +268,9 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     ) external view returns (uint256) {
         IYearnVaultV2 vault = IYearnVaultV2(_vault);
         address _pool = vault.token();
-        require(_pool == pool, "!pool");
+        if (_pool != pool) {
+            revert WrongVaultForPool();
+        }
 
         if (_usePessimisticPricing) {
             return
@@ -276,24 +326,31 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
 
         // if a price is older than our preset heartbeat, we're in trouble
         if (block.timestamp - updatedAt > heartbeat) {
-            revert("Price is stale");
+            revert PriceStale();
         }
 
         // you mean we can't have negative prices?
         if (price <= 0) {
-            revert("Invalid feed price");
+            revert PriceInvalid();
         }
 
         // make sure the sequencer is up
         // uint80 roundID int256 sequencerAnswer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound
-        (, int256 sequencerAnswer, , , ) = sequencerUptimeFeed
+        (, int256 sequencerAnswer, uint256 startedAt, , ) = sequencerUptimeFeed
             .latestRoundData();
 
-        // Answer == 0: Sequencer is up
-        // Answer == 1: Sequencer is down
+        // Answer == 0: L2 Sequencer is up
+        // Answer == 1: L2 Sequencer is down
         if (sequencerAnswer == 1) {
-            revert("L2 sequencer down");
+            revert SequencerDown();
         }
+
+        // Make sure a grace period of one hour has passed after the sequencer is back up.
+        uint256 timeSinceUp = block.timestamp - startedAt;
+        if (timeSinceUp < 3600) {
+            revert GracePeriodNotOver();
+        }
+
         currentPrice = uint256(price);
     }
 
@@ -321,36 +378,23 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
         view
         returns (uint256 price0, uint256 price1)
     {
-        IVeloPool poolContract = IVeloPool(pool);
-        (
-            uint256 decimals0, // note that this will be "1e18"", not "18"
-            uint256 decimals1,
-            ,
-            ,
-            ,
-            address _token0,
-            address _token1
-        ) = poolContract.metadata();
-
         // check if we have chainlink feeds or TWAP for each token
         if (token0Feed != address(0)) {
             price0 = getChainlinkPrice(0); // returned with 8 decimals
             if (token1Feed != address(0)) {
                 price1 = getChainlinkPrice(1); // returned with 8 decimals
             } else {
-                // get twap price for token1. this is the amount of token1 we would get from 1 token0
+                // get twap price for token1. this is the amount of token1 we would get from 0.01 token0
                 price1 =
-                    ((decimals1 * decimals1) / 100) /
-                    getTwapPrice(_token0, decimals0 / 100); // returned in decimals1
-                price1 = (price0 * price1) / (decimals1);
+                    (price0 * decimals1) /
+                    (getTwapPrice(token0, decimals0 / 100) * 100);
             }
         } else if (token1Feed != address(0)) {
             price1 = getChainlinkPrice(1); // returned with 8 decimals
-            // get twap price for token0
+            // get twap price for token0. this is the amount of token0 we would get from 0.01 token1
             price0 =
-                ((decimals0 * decimals0) / 100) /
-                getTwapPrice(_token1, decimals1 / 100); // returned in decimals0
-            price0 = (price0 * price1) / (decimals0);
+                (price1 * decimals0) /
+                (getTwapPrice(token1, decimals1 / 100) * 100);
         }
     }
 
@@ -361,7 +405,9 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     // @param _pool LP token to update pricing for.
     function updatePrice() external {
         // don't let just anyone update deez prices
-        require(operator[msg.sender], "unauthorized");
+        if (!operator[msg.sender]) {
+            revert NotOperator();
+        }
         _updatePrice();
     }
 
@@ -396,7 +442,9 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
         // if we haven't updated yet today, pretend it's yesterday instead
         if (dailyUpdates[day] == 0) {
             day -= 1;
-            require(dailyUpdates[day] > 0, "!updates");
+            if (dailyUpdates[day] == 0) {
+                revert NoRecentPriceUpdates();
+            }
         }
 
         // get today's low
@@ -426,18 +474,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     ) internal view returns (uint256 fairReservesPricing) {
         // get what we need to calculate our reserves and pricing
         IVeloPool poolContract = IVeloPool(_pool);
-        if (poolContract.decimals() != 18) {
-            revert("Lp token must have 18 decimals");
-        }
-        (
-            uint256 decimals0, // note that this will be "1e18"", not "18"
-            uint256 decimals1,
-            uint256 reserve0,
-            uint256 reserve1,
-            ,
-            ,
-
-        ) = poolContract.metadata();
+        (uint256 reserve0, uint256 reserve1, ) = poolContract.getReserves();
 
         // make sure our reserves are normalized to 18 decimals (looking at you, USDC)
         reserve0 = (reserve0 * DECIMALS) / decimals0;
@@ -446,7 +483,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
         // pull our prices
         (uint256 price0, uint256 price1) = getTokenPrices();
 
-        if (poolContract.stable()) {
+        if (stable) {
             fairReservesPricing = _calculate_stable_lp_token_price(
                 poolContract.totalSupply(),
                 price0,
