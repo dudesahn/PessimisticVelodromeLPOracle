@@ -3,11 +3,11 @@ pragma solidity ^0.8.20;
 
 import {IERC4626} from "@openzeppelin/contracts@5.3.0/interfaces/IERC4626.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts@5.3.0/access/Ownable2Step.sol";
-import {IYearnVaultV2} from "./interfaces/IYearnVaultV2.sol";
-import {IVeloPool} from "./interfaces/IVeloPool.sol";
-import {IChainLinkOracle} from "./interfaces/IChainLinkOracle.sol";
-import {ShareValueHelper} from "./ShareValueHelper.sol";
-import {FixedPointMathLib} from "./FixedPointMathLib.sol";
+import {IYearnVaultV2} from "contracts/interfaces/IYearnVaultV2.sol";
+import {IVeloPool} from "contracts/interfaces/IVeloPool.sol";
+import {IChainLinkOracle} from "contracts/interfaces/IChainLinkOracle.sol";
+import {ShareValueHelper} from "contracts/ShareValueHelper.sol";
+import {FixedPointMathLib} from "contracts/FixedPointMathLib.sol";
 
 /**
  * @title Velodrome LP Pessimistic Single Oracle
