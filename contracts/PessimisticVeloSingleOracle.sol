@@ -240,7 +240,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     ) external view returns (uint256) {
         IERC4626 vault = IERC4626(_vault);
         address _pool = vault.asset();
-        if (_pool == pool) {
+        if (_pool != pool) {
             revert WrongVaultForPool();
         }
 
@@ -268,7 +268,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     ) external view returns (uint256) {
         IYearnVaultV2 vault = IYearnVaultV2(_vault);
         address _pool = vault.token();
-        if (_pool == pool) {
+        if (_pool != pool) {
             revert WrongVaultForPool();
         }
 
@@ -405,7 +405,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     // @param _pool LP token to update pricing for.
     function updatePrice() external {
         // don't let just anyone update deez prices
-        if (operator[msg.sender] != true) {
+        if (!operator[msg.sender]) {
             revert NotOperator();
         }
         _updatePrice();
