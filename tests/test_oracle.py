@@ -183,6 +183,7 @@ def test_normal_oracle_single(
 
     price = oracle.getCurrentPoolPrice(use_pessimistic)
     print("rETH/WETH LP Price:", "${:,.2f}".format(price / 1e8), "\n")
+    print("Pool name:", oracle.poolName())
 
     # update some prices
     oracle.setOperator(gov, True, {"from": gov})
@@ -214,6 +215,7 @@ def test_normal_oracle_single(
 
     price = oracle.getCurrentPoolPrice(use_pessimistic)
     print("tBTC/WETH LP Price:", "${:,.2f}".format(price / 1e8), "\n")
+    print("Pool name:", oracle.poolName())
 
     # update some prices
     oracle.setOperator(gov, True, {"from": gov})

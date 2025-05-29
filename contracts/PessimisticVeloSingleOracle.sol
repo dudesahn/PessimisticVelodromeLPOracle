@@ -97,6 +97,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
 
     /* ========== CONSTRUCTOR ========== */
     /**
+     * @dev Check Chainlink's documentation for heartbeat length of their various feeds.
      * @param _pool Address of the Velodrome pool this oracle is pricing.
      * @param _token0Feed The Chainlink feed for token0.
      * @param _token1Feed The Chainlink feed for token1.
@@ -120,6 +121,14 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
             revert TooFewTwapPoints();
         }
         points = _twapPoints;
+
+        // A heartbeat is the amount of time after which we consider a chainlink feed's price to be stale. For major
+        // assets like BTC and ETH, this value is 3600 (1 hour). For less actively traded assets, this can be as high as
+        // 86400 (1 day). Note that chainlink price feeds update based on price movement of an asset or heartbeat,
+        // whichever comes sooner.
+        if (_token0Heartbeat < 3600 || _token1Heartbeat < 3600) {
+            revert HeartbeatTooShort();
+        }
 
         // set the pool in the constructor, pull token0 and token1 from that
         pool = _pool;
@@ -161,10 +170,10 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
             revert NotChainlinkDecimals();
         }
 
-        // set our immutables
+        // set our feeds and heartbeat
         token0Feed = _token0Feed;
-        token0Heartbeat = _token0Heartbeat;
         token1Feed = _token1Feed;
+        token0Heartbeat = _token0Heartbeat;
         token1Heartbeat = _token1Heartbeat;
     }
 
@@ -175,6 +184,7 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     event SetUseThreeDayLow(bool useThreeDayWindow);
 
     error TooFewTwapPoints();
+    error HeartbeatTooShort();
     error NotLpDecimals();
     error NoChainlinkOracle();
     error NotChainlinkDecimals();
@@ -187,6 +197,11 @@ contract PessimisticVeloSingleOracle is Ownable2Step {
     error NoRecentPriceUpdates();
 
     /* ========== VIEW FUNCTIONS ========== */
+
+    /// @notice Name of the pool this oracle is pricing
+    function poolName() public view returns (string memory) {
+        return IVeloPool(pool).name();
+    }
 
     /**
      * @notice Check the last time a token's Chainlink price was updated.
