@@ -224,6 +224,244 @@ def test_normal_oracle_single(
     print("tBTC/WETH LP Price:", "${:,.2f}".format(price / 1e8), "\n")
 
 
+# test our single oracle spot vs reserves with and without balancing
+def test_oracle_balanced_single(
+    gov,
+    PessimisticVeloSingleOracle,
+):
+    # test out the prices our oracle returns for sAMM when token prices are the same, different, and when pool is balanced vs not
+    # snapshot our chain before we do everything
+    chain.snapshot()
+
+    # set our chainlink feeds, 10 day heartbeat
+    # use the correct feed here
+    # WETH
+    feed0 = "0x13e3Ee699D1909E989722E753853AE30b17e08c5"
+    feed1 = "0x0805fAA94F056C06c2a69e115Aa7633EfD3efDca"
+    heartbeat0 = 864000
+    heartbeat1 = 864000
+    twap_points = 4
+    use_pessimistic = False
+
+    # alETH-WETH, both chainlink
+    pool = "0xa1055762336F92b4B8d2eDC032A0Ce45ead6280a"
+
+    oracle = gov.deploy(
+        PessimisticVeloSingleOracle,
+        pool,
+        feed0,
+        feed1,
+        heartbeat0,
+        heartbeat1,
+        twap_points,
+        gov,
+    )
+
+    # alETH-WETH (alETH is chainlink, stable)
+    pool = interface.IVeloPoolV2(
+        "0xa1055762336F92b4B8d2eDC032A0Ce45ead6280a"
+    )  # ~$2.5M as of 4/28/25
+    aleth = Contract("0x3E29D3A9316dAB217754d13b28646B76607c5f04")
+    weth = Contract("0x4200000000000000000000000000000000000006")
+    price1, price2 = oracle.getTokenPrices()
+    whale = accounts.at(
+        "0xe50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8", force=True
+    )  # weth
+    other_whale = accounts.at(
+        "0xC224bf25Dcc99236F00843c7D8C4194abE8AA94a", force=True
+    )  # aleth
+    aleth.transfer(whale, 100e18, {"from": other_whale})
+    router = Contract("0xa062aE8A9c5e11aaA026fc2670B0D65cCc8B2858")
+    weth.approve(router, 2**256 - 1, {"from": whale})
+    aleth.approve(router, 2**256 - 1, {"from": whale})
+    pool_factory = "0xF1046053aa5682b4F9a81b5481394DA16BE5FF5a"
+    main_route = [
+        [weth, aleth, True, pool_factory],
+    ]
+    route = [
+        [aleth, weth, True, pool_factory],
+    ]
+
+    # check our reserves
+    print("Reserve0:", pool.reserve0())
+    print("Reserve1:", pool.reserve1())
+
+    router.swapExactTokensForTokens(
+        1e18, 0, route, whale.address, 2**256 - 1, {"from": whale}
+    )
+
+    print("\n✅  For alETH-WETH, price should drift with swaps (stable pool) ✅ \n")
+    print(
+        "alETH, WETH Prices:",
+        "${:,.8f}".format(price1 / 1e8),
+        ",",
+        "${:,.8f}".format(price2 / 1e8),
+    )
+    aleth_price = price1 / 1e8
+    weth_price = price2 / 1e8
+    spot_price = (
+        weth.balanceOf(pool) / 1e18 * weth_price
+        + aleth.balanceOf(pool) / 1e18 * aleth_price
+    ) / (pool.totalSupply() / 1e18)
+    print("Spot price before balancing:", "${:,.2f}".format(spot_price))
+
+    # swap in 200 WETH
+    amount_to_swap = 196e18
+
+    # check ratios and TVL
+    print("Pool TVL:", "${:,.8f}".format(spot_price * pool.totalSupply() / 1e18))
+
+    price = oracle.getCurrentPoolPrice(False) / 1e8
+    print(
+        "alETH/WETH LP Reserve Price before balancing:", "${:,.8f}".format(price), "\n"
+    )
+    price_diff = abs(price - spot_price)
+    print(
+        "Price difference spot vs reserves alETH-WETH:", "${:,.5f}".format(price_diff)
+    )
+
+    # weth whale swaps in a lot, should tank price of WETH
+    router.swapExactTokensForTokens(
+        amount_to_swap, 0, main_route, whale.address, 2**256 - 1, {"from": whale}
+    )
+    print("Reserve0:", pool.reserve0())
+    print("Reserve1:", pool.reserve1())
+
+    # alETH-WETH
+    spot_price = (
+        (weth.balanceOf(pool) / 1e18 * weth_price)
+        + (aleth.balanceOf(pool) / 1e18 * aleth_price)
+    ) / (pool.totalSupply() / 1e18)
+    print("LP spot price after balancing amounts:", "${:,.2f}".format(spot_price))
+
+    manipulation_price = oracle.getCurrentPoolPrice(False) / 1e8
+    print(
+        "alETH-WETH Reserve LP Price after balancing amounts:",
+        "${:,.8f}".format(manipulation_price),
+    )
+    price_diff = abs(manipulation_price - spot_price)
+    print(
+        "Price difference spot vs reserves alETH-WETH:", "${:,.5f}".format(price_diff)
+    )
+
+    ##############################################################################################################
+
+    # revert to our snapshot for the new pair
+    chain.revert()
+
+    # set our chainlink feeds, 10 day heartbeat
+    # use the correct feed here
+    # WETH
+    feed0 = "0x13e3Ee699D1909E989722E753853AE30b17e08c5"
+    feed1 = feed0
+    heartbeat0 = 864000
+    heartbeat1 = 864000
+    twap_points = 4
+    use_pessimistic = False
+
+    # alETH-WETH, both chainlink
+    pool = "0xa1055762336F92b4B8d2eDC032A0Ce45ead6280a"
+
+    oracle = gov.deploy(
+        PessimisticVeloSingleOracle,
+        pool,
+        feed0,
+        feed1,
+        heartbeat0,
+        heartbeat1,
+        twap_points,
+        gov,
+    )
+
+    # alETH-WETH (alETH is chainlink, stable)
+    pool = interface.IVeloPoolV2(
+        "0xa1055762336F92b4B8d2eDC032A0Ce45ead6280a"
+    )  # ~$2.5M as of 4/28/25
+    aleth = Contract("0x3E29D3A9316dAB217754d13b28646B76607c5f04")
+    weth = Contract("0x4200000000000000000000000000000000000006")
+    price1, price2 = oracle.getTokenPrices()
+    whale = accounts.at(
+        "0xe50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8", force=True
+    )  # weth
+    other_whale = accounts.at(
+        "0xC224bf25Dcc99236F00843c7D8C4194abE8AA94a", force=True
+    )  # aleth
+    aleth.transfer(whale, 100e18, {"from": other_whale})
+    router = Contract("0xa062aE8A9c5e11aaA026fc2670B0D65cCc8B2858")
+    weth.approve(router, 2**256 - 1, {"from": whale})
+    aleth.approve(router, 2**256 - 1, {"from": whale})
+    pool_factory = "0xF1046053aa5682b4F9a81b5481394DA16BE5FF5a"
+    main_route = [
+        [weth, aleth, True, pool_factory],
+    ]
+    route = [
+        [aleth, weth, True, pool_factory],
+    ]
+
+    # check our reserves
+    print("Reserve0:", pool.reserve0())
+    print("Reserve1:", pool.reserve1())
+
+    router.swapExactTokensForTokens(
+        1e18, 0, route, whale.address, 2**256 - 1, {"from": whale}
+    )
+
+    print("\n✅  For alETH-WETH, price should drift with swaps (stable pool) ✅ \n")
+    print("🤝 HERE WE ARE USING THE SAME EXACT PRICE FOR ETH AND ALETH 🤝")
+    print(
+        "alETH, WETH Prices:",
+        "${:,.8f}".format(price1 / 1e8),
+        ",",
+        "${:,.8f}".format(price2 / 1e8),
+    )
+    aleth_price = price1 / 1e8
+    weth_price = price2 / 1e8
+    spot_price = (
+        weth.balanceOf(pool) / 1e18 * weth_price
+        + aleth.balanceOf(pool) / 1e18 * aleth_price
+    ) / (pool.totalSupply() / 1e18)
+    print("Spot price before balancing:", "${:,.2f}".format(spot_price))
+
+    # swap in 200 WETH (Note: play with this until reserves end up being roughly equal)
+    amount_to_swap = 196e18
+
+    # check ratios and TVL
+    print("Pool TVL:", "${:,.8f}".format(spot_price * pool.totalSupply() / 1e18))
+
+    price = oracle.getCurrentPoolPrice(False) / 1e8
+    print(
+        "alETH/WETH LP Reserve Price before balancing:", "${:,.8f}".format(price), "\n"
+    )
+    price_diff = abs(price - spot_price)
+    print(
+        "Price difference spot vs reserves alETH-WETH:", "${:,.5f}".format(price_diff)
+    )
+
+    # weth whale swaps in a lot, should tank price of WETH
+    router.swapExactTokensForTokens(
+        amount_to_swap, 0, main_route, whale.address, 2**256 - 1, {"from": whale}
+    )
+    print("Reserve0:", pool.reserve0())
+    print("Reserve1:", pool.reserve1())
+
+    # alETH-WETH
+    spot_price = (
+        (weth.balanceOf(pool) / 1e18 * weth_price)
+        + (aleth.balanceOf(pool) / 1e18 * aleth_price)
+    ) / (pool.totalSupply() / 1e18)
+    print("LP spot price after balancing amounts:", "${:,.2f}".format(spot_price))
+
+    manipulation_price = oracle.getCurrentPoolPrice(False) / 1e8
+    print(
+        "alETH-WETH Reserve LP Price after balancing amounts:",
+        "${:,.8f}".format(manipulation_price),
+    )
+    price_diff = abs(manipulation_price - spot_price)
+    print(
+        "Price difference spot vs reserves alETH-WETH:", "${:,.5f}".format(price_diff)
+    )
+
+
 def test_oracle_price_manipulation(
     gov,
     oracle,
@@ -458,8 +696,8 @@ def test_oracle_price_manipulation(
     ) / (pool.totalSupply() / 1e18)
     print("Spot price:", "${:,.2f}".format(spot_price))
 
-    # swap in 13 tBTC
-    amount_to_swap = 13e18
+    # swap in 11 tBTC
+    amount_to_swap = 11e18
 
     # check ratios and TVL
     print("Pool TVL:", "${:,.8f}".format(spot_price * pool.totalSupply() / 1e18))
@@ -666,8 +904,8 @@ def test_oracle_price_manipulation(
     ) / (pool.totalSupply() / 1e18)
     print("Spot price:", "${:,.2f}".format(spot_price))
 
-    # swap in 13 tBTC
-    amount_to_swap = 13e18
+    # swap in 11 tBTC
+    amount_to_swap = 11e18
 
     # check ratios and TVL
     print("Pool TVL:", "${:,.8f}".format(spot_price * pool.totalSupply() / 1e18))
@@ -1153,6 +1391,157 @@ def test_oracle_price_manipulation(
     # increasing the window should decrease the distance between rekt price and correct price
     assert abs(swap_manipulation_price - price) > abs(
         window_swap_manipulation_price - price
+    )
+
+    ##############################################################################################################
+
+    # revert to our snapshot for the new pair
+    chain.revert()
+
+    # alETH-WETH (use chainlink for this alETH run)
+    # WBTC
+    feed = "0x0805fAA94F056C06c2a69e115Aa7633EfD3efDca"
+    token = "0x3E29D3A9316dAB217754d13b28646B76607c5f04"
+    oracle.setFeed(token, feed, 864000, {"from": gov})
+
+    pool = interface.IVeloPoolV2(
+        "0xa1055762336F92b4B8d2eDC032A0Ce45ead6280a"
+    )  # ~$2.5M as of 4/28/25
+    aleth = Contract("0x3E29D3A9316dAB217754d13b28646B76607c5f04")
+    weth = Contract("0x4200000000000000000000000000000000000006")
+    price1, price2 = oracle.getTokenPrices(pool)
+    whale = accounts.at(
+        "0xe50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8", force=True
+    )  # weth
+    other_whale = accounts.at(
+        "0xC224bf25Dcc99236F00843c7D8C4194abE8AA94a", force=True
+    )  # aleth
+    aleth.transfer(whale, 100e18, {"from": other_whale})
+    router = Contract("0xa062aE8A9c5e11aaA026fc2670B0D65cCc8B2858")
+    weth.approve(router, 2**256 - 1, {"from": whale})
+    aleth.approve(router, 2**256 - 1, {"from": whale})
+    pool_factory = "0xF1046053aa5682b4F9a81b5481394DA16BE5FF5a"
+    main_route = [
+        [weth, aleth, True, pool_factory],
+    ]
+    route = [
+        [aleth, weth, True, pool_factory],
+    ]
+
+    print(
+        "\n✅  For alETH-WETH w/ chainlink ⛓️, price should only drift with swaps (stable pool) ✅ \n"
+    )
+    print(
+        "alETH, WETH Prices:",
+        "${:,.8f}".format(price1 / 1e8),
+        ",",
+        "${:,.8f}".format(price2 / 1e8),
+    )
+    aleth_price = price1 / 1e8
+    weth_price = price2 / 1e8
+    spot_price = (
+        weth.balanceOf(pool) / 1e18 * weth_price
+        + aleth.balanceOf(pool) / 1e18 * aleth_price
+    ) / (pool.totalSupply() / 1e18)
+    print("Spot price:", "${:,.2f}".format(spot_price))
+
+    # swap in 4,000 WETH (~$6.8M)
+    amount_to_swap = 4_000e18
+
+    # check ratios and TVL
+    print("Pool TVL:", "${:,.8f}".format(spot_price * pool.totalSupply() / 1e18))
+    print("Whale swap:", "${:,.8f}".format(amount_to_swap * weth_price / 1e18))
+    ratio = amount_to_swap / (spot_price * pool.totalSupply())
+    print("Swap to TVL Ratio:", "{:,.2f}x".format(ratio))
+
+    price_timestamp = pool.lastObservation()["timestamp"]
+    price = oracle.getCurrentPoolPrice(pool) / 1e8
+    print("alETH/WETH LP Price:", "${:,.8f}".format(price), "\n")
+    price_diff = abs(price - spot_price)
+    print(
+        "Price difference spot vs reserves alETH-WETH:", "${:,.5f}".format(price_diff)
+    )
+
+    # weth whale swaps in a lot, should tank price of WETH
+    router.swapExactTokensForTokens(
+        amount_to_swap, 0, main_route, whale.address, 2**256 - 1, {"from": whale}
+    )
+
+    # alETH-WETH
+    price1, price2 = oracle.getTokenPrices(pool)
+    print(
+        "alETH, WETH Prices after manipulation:",
+        "${:,.8f}".format(price1 / 1e8),
+        ",",
+        "${:,.8f}".format(price2 / 1e8),
+    )
+    spot_price = (
+        (weth.balanceOf(pool) / 1e18 * weth_price)
+        + (aleth.balanceOf(pool) / 1e18 * aleth_price)
+    ) / (pool.totalSupply() / 1e18)
+    print("LP spot price after manipulation:", "${:,.2f}".format(spot_price))
+
+    manipulation_price = oracle.getCurrentPoolPrice(pool) / 1e8
+    print(
+        "alETH-WETH Reserve LP Price after manipulation:",
+        "${:,.8f}".format(manipulation_price),
+    )
+
+    # the manipulation should have no effect
+    assert price == manipulation_price
+
+    # do 5 swaps but just 5 seconds, shouldn't change prices vs previous swaps significantly
+    chain.sleep(1)
+    chain.mine(1)
+    router.swapExactTokensForTokens(
+        1e18, 0, route, whale.address, 2**256 - 1, {"from": whale}
+    )
+
+    chain.sleep(1)
+    chain.mine(1)
+    router.swapExactTokensForTokens(
+        1e18, 0, route, whale.address, 2**256 - 1, {"from": whale}
+    )
+
+    chain.sleep(1)
+    chain.mine(1)
+    router.swapExactTokensForTokens(
+        1e18, 0, route, whale.address, 2**256 - 1, {"from": whale}
+    )
+
+    chain.sleep(1)
+    chain.mine(1)
+    router.swapExactTokensForTokens(
+        1e18, 0, route, whale.address, 2**256 - 1, {"from": whale}
+    )
+
+    chain.sleep(1)
+    chain.mine(1)
+    router.swapExactTokensForTokens(
+        1e18, 0, route, whale.address, 2**256 - 1, {"from": whale}
+    )
+
+    print("Swap a few times, but don't sleep much")
+    price1, price2 = oracle.getTokenPrices(pool)
+    print(
+        "\nalETH, WETH Prices after manipulation + swaps/sleeps:",
+        "${:,.8f}".format(price1 / 1e8),
+        ",",
+        "${:,.8f}".format(price2 / 1e8),
+    )
+    spot_price = (
+        weth.balanceOf(pool) / 1e18 * weth_price
+        + aleth.balanceOf(pool) / 1e18 * aleth_price
+    ) / (pool.totalSupply() / 1e18)
+    print(
+        "LP spot price after manipulation + tiny swaps/sleeps:",
+        "${:,.2f}".format(spot_price),
+    )
+
+    tiny_swap_manipulation_price = oracle.getCurrentPoolPrice(pool) / 1e8
+    print(
+        "alETH-WETH Reserve LP Price after manipulation + tiny swaps/sleeps:",
+        "${:,.8f}".format(tiny_swap_manipulation_price),
     )
 
     ##############################################################################################################
@@ -2350,7 +2739,7 @@ def test_oracle_price_manipulation(
 
     # usdt whale swaps in a lot, should tank price of USDT
     whale = accounts.at(
-        "0xacD03D601e5bB1B275Bb94076fF46ED9D753435A", force=True
+        "0x7217F8A697713f6F7DE06CFcD80B76A2CbA375f0", force=True
     )  # usdt
     other_whale = accounts.at(
         "0xDecC0c09c3B5f6e92EF4184125D5648a66E35298", force=True
